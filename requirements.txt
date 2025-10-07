@@ -1,0 +1,8 @@
+# Codex Project Requirements
+
+# Core dependencies (none required for basic functionality)
+# The project uses only Python standard library
+
+# Optional dependencies for enhanced features:
+# requests>=2.31.0  # For API calls (when implementing real Sora API)
+# openai>=1.0.0     # For OpenAI API integration (when implementing real AI assistant)
