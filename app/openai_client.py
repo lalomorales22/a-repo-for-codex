@@ -11,10 +11,17 @@ from .config import Settings
 def _format_history(history: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     for item in history:
+        role = item["role"]
+        content_type = "output_text" if role == "assistant" else "input_text"
         messages.append(
             {
-                "role": item["role"],
-                "content": [{"type": "text", "text": item["content"]}],
+                "role": role,
+                "content": [
+                    {
+                        "type": content_type,
+                        "text": item["content"],
+                    }
+                ],
             }
         )
     return messages
@@ -57,7 +64,14 @@ class OpenAIMegaClient:
                 "usage": {},
             }
 
-        output = response.output[0].content[0].text if response.output else ""
+        if getattr(response, "output", None):
+            output = response.output[0].content[0].text
+        else:
+            output_text = getattr(response, "output_text", "")
+            if isinstance(output_text, list):
+                output = "".join(output_text)
+            else:
+                output = output_text or ""
         usage = response.usage or {}
         return {
             "role": "assistant",
@@ -118,13 +132,13 @@ class OpenAIMegaClient:
         # treated as a video artifact on the frontend.
         try:
             response = self._client.responses.create(
-                model="gpt-4.1-mini",
+                model="gpt-5-chat-latest",
                 input=[
                     {
                         "role": "user",
                         "content": [
                             {
-                                "type": "text",
+                                "type": "input_text",
                                 "text": (
                                     "Create a cinematic storyboard synopsis for a short video "
                                     f"({duration_seconds}s, {aspect_ratio} ratio, {quality} quality) "
@@ -147,7 +161,14 @@ class OpenAIMegaClient:
                 "revised_prompt": f"{prompt} (error: {exc})",
             }
 
-        storyboard = response.output[0].content[0].text if response.output else prompt
+        if getattr(response, "output", None):
+            storyboard = response.output[0].content[0].text
+        else:
+            storyboard_text = getattr(response, "output_text", "")
+            if isinstance(storyboard_text, list):
+                storyboard = "".join(storyboard_text) or prompt
+            else:
+                storyboard = storyboard_text or prompt
         orientation = "vertical" if aspect_ratio in {"9:16", "3:4"} else "landscape"
         return {
             "url": "https://samplelib.com/lib/preview/mp4/sample-5s.mp4",

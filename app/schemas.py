@@ -25,7 +25,7 @@ class ConversationRead(BaseModel):
 class MessageCreate(BaseModel):
     role: str = Field(default="user")
     content: str = Field(..., min_length=1)
-    model: str = Field(default="gpt-4.1-mini")
+    model: str = Field(default="gpt-5-chat-latest")
 
 
 class MessageRead(BaseModel):
