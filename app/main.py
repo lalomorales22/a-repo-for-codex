@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from .config import BASE_DIR, get_settings
 from .database import (
+    Agent,
     Conversation,
     Gallery,
     GalleryAsset,
@@ -22,6 +23,12 @@ from .database import (
 )
 from .openai_client import OpenAIMegaClient
 from .schemas import (
+    AgentBuildRequest,
+    AgentBuildResponse,
+    AgentCreate,
+    AgentPlan,
+    AgentRead,
+    AgentUpdate,
     ConversationCreate,
     ConversationRead,
     ConversationUpdate,
@@ -366,3 +373,64 @@ def render_studio_video(payload: StudioRenderRequest, db=Depends(get_db)):
     db.refresh(asset)
 
     return StudioRenderResponse(asset=GalleryAssetRead.model_validate(asset))
+
+
+@app.get("/api/agents", response_model=list[AgentRead])
+def list_agents(db=Depends(get_db)):
+    agents = db.query(Agent).order_by(Agent.updated_at.desc()).all()
+    return [AgentRead.model_validate(agent) for agent in agents]
+
+
+@app.post("/api/agents", response_model=AgentRead, status_code=status.HTTP_201_CREATED)
+def create_agent(payload: AgentCreate, db=Depends(get_db)):
+    clean_capabilities = [item.strip() for item in payload.capabilities if item.strip()]
+    clean_tools = [item.strip() for item in payload.tools if item.strip()]
+
+    agent = Agent(
+        name=payload.name.strip(),
+        mission=payload.mission.strip(),
+        instructions=payload.instructions.strip(),
+        workflow=payload.workflow.strip() if payload.workflow else None,
+    )
+    agent.capabilities = clean_capabilities
+    agent.tools = clean_tools
+
+    db.add(agent)
+    db.flush()
+    db.refresh(agent)
+    return AgentRead.model_validate(agent)
+
+
+@app.patch("/api/agents/{agent_id}", response_model=AgentRead)
+def update_agent(agent_id: int, payload: AgentUpdate, db=Depends(get_db)):
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    data = payload.model_dump(exclude_unset=True)
+
+    if "capabilities" in data:
+        agent.capabilities = [item.strip() for item in data.pop("capabilities") or [] if item.strip()]
+    if "tools" in data:
+        agent.tools = [item.strip() for item in data.pop("tools") or [] if item.strip()]
+
+    for field, value in data.items():
+        if isinstance(value, str):
+            setattr(agent, field, value.strip())
+        else:
+            setattr(agent, field, value)
+
+    db.flush()
+    db.refresh(agent)
+    return AgentRead.model_validate(agent)
+
+
+@app.post("/api/agents/build", response_model=AgentBuildResponse)
+def build_agent(payload: AgentBuildRequest) -> AgentBuildResponse:
+    brief = payload.prompt.strip()
+    if payload.context:
+        brief = f"{brief}\n\nContext:\n{payload.context.strip()}"
+
+    plan_data = openai_client.plan_agent(brief)
+    plan = AgentPlan.model_validate(plan_data)
+    return AgentBuildResponse(plan=plan)

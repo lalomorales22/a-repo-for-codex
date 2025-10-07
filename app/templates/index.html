@@ -29,6 +29,7 @@
             <button class="dropdown__item" data-widget-type="chat" type="button">New chat workspace</button>
             <button class="dropdown__item" data-widget-type="image" type="button">Image generator</button>
             <button class="dropdown__item" data-widget-type="video" type="button">Video generator</button>
+            <button class="dropdown__item" data-widget-type="agent" type="button">Agents control room</button>
             <button class="dropdown__item" data-widget-type="world" type="button">3D world creator</button>
           </div>
         </div>
@@ -56,7 +57,7 @@
           <span class="canvas-controls__label">Canvas zoom</span>
           <div class="canvas-controls__buttons">
             <button class="canvas-controls__btn" data-zoom="out" type="button" aria-label="Zoom out">−</button>
-            <button class="canvas-controls__btn" data-zoom="reset" type="button">Reset</button>
+            <button class="canvas-controls__btn canvas-controls__btn--reset" data-zoom="reset" type="button">Reset</button>
             <button class="canvas-controls__btn" data-zoom="in" type="button" aria-label="Zoom in">+</button>
           </div>
         </div>
@@ -246,7 +247,9 @@
                   <button type="submit" class="btn btn--primary">Generate asset</button>
                   <p class="studio-form__hint">All outputs are saved to the main feed automatically.</p>
                 </div>
+                <div id="studio-generate-status" class="studio-status" role="status" aria-live="polite"></div>
               </form>
+              <div id="studio-generate-preview" class="studio-preview" aria-live="polite"></div>
             </section>
 
             <section id="studio-view-gallery" class="studio-view" data-view="gallery">
@@ -354,13 +357,72 @@
     <section id="agents" class="agents" aria-hidden="true">
       <div class="agents__surface">
         <header class="agents__header">
-          <h2>Agents workspace</h2>
-          <p>A blank canvas for your future agent tools.</p>
+          <div>
+            <p class="agents__eyebrow">Autonomous crew</p>
+            <h2>Agents workspace</h2>
+            <p>Spin up assistants, orchestrate workflows, and iterate on capabilities with AI help.</p>
+          </div>
           <button id="agents-close" class="btn" type="button">Close</button>
         </header>
         <div class="agents__body">
-          <div class="agents__placeholder">
-            <p>Design your agent orchestration tools here.</p>
+          <aside class="agents__sidebar" aria-label="Agents list">
+            <div class="agents__sidebar-header">
+              <h3>Your agents</h3>
+              <span id="agents-count" class="agents__count">0 active</span>
+            </div>
+            <ul id="agents-list" class="agents-list"></ul>
+            <button id="agents-new-from-plan" class="btn btn--ghost agents__open-builder" type="button">
+              Design new agent
+            </button>
+          </aside>
+          <div class="agents__workspace">
+            <section class="agents__builder" aria-labelledby="agent-builder-title">
+              <div class="agents__builder-header">
+                <div>
+                  <p class="agents__eyebrow">AI builder</p>
+                  <h3 id="agent-builder-title">Ask the AI to blueprint an agent</h3>
+                  <p class="agents__subtitle">Describe the outcomes you want; the builder will shape the ideal configuration.</p>
+                </div>
+                <button id="agent-builder-clear" class="btn btn--ghost btn--sm" type="button">Clear</button>
+              </div>
+              <form id="agent-builder-form" class="agents__form">
+                <label class="agents-field">
+                  <span>What do you need the agent to handle?</span>
+                  <textarea
+                    id="agent-builder-prompt"
+                    name="prompt"
+                    placeholder="E.g. Turn customer feedback into weekly product briefs"
+                    required
+                  ></textarea>
+                </label>
+                <label class="agents-field agents-field--stacked">
+                  <span>Additional context (optional)</span>
+                  <textarea
+                    id="agent-builder-context"
+                    name="context"
+                    placeholder="Systems, data sources, or collaborators to consider"
+                  ></textarea>
+                </label>
+                <div class="agents__form-actions">
+                  <button type="submit" class="btn btn--primary">Generate agent plan</button>
+                  <span id="agent-builder-status" class="agents-status" role="status" aria-live="polite"></span>
+                </div>
+              </form>
+              <div id="agent-plan" class="agents-plan" hidden>
+                <header class="agents-plan__header">
+                  <div>
+                    <p class="agents__eyebrow">Proposed agent</p>
+                    <h4 id="agent-plan-name"></h4>
+                  </div>
+                  <div class="agents-plan__actions">
+                    <button id="agent-plan-save" class="btn btn--primary btn--sm" type="button">Save agent</button>
+                    <button id="agent-plan-dismiss" class="btn btn--ghost btn--sm" type="button">Dismiss</button>
+                  </div>
+                </header>
+                <dl id="agent-plan-details" class="agents-plan__grid"></dl>
+              </div>
+            </section>
+            <section class="agents__detail" id="agent-detail" aria-live="polite"></section>
           </div>
         </div>
       </div>

@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Generator
 
+import json
+
 from sqlalchemy import (
     DateTime,
     ForeignKey,
@@ -113,6 +115,52 @@ class Gallery(Base):
     @property
     def asset_count(self) -> int:
         return len(self.assets)
+
+
+class Agent(Base):
+    """Stored automation agent configuration."""
+
+    __tablename__ = "agents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mission: Mapped[str] = mapped_column(Text, nullable=False)
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    workflow: Mapped[str] = mapped_column(Text, nullable=True)
+    capabilities_json: Mapped[str] = mapped_column(Text, nullable=True)
+    tools_json: Mapped[str] = mapped_column(Text, nullable=True)
+
+    @property
+    def capabilities(self) -> list[str]:
+        if not self.capabilities_json:
+            return []
+        try:
+            return json.loads(self.capabilities_json)
+        except ValueError:
+            return []
+
+    @capabilities.setter
+    def capabilities(self, values: list[str]) -> None:
+        if values:
+            self.capabilities_json = json.dumps(values)
+        else:
+            self.capabilities_json = None
+
+    @property
+    def tools(self) -> list[str]:
+        if not self.tools_json:
+            return []
+        try:
+            return json.loads(self.tools_json)
+        except ValueError:
+            return []
+
+    @tools.setter
+    def tools(self, values: list[str]) -> None:
+        if values:
+            self.tools_json = json.dumps(values)
+        else:
+            self.tools_json = None
 
 
 class GalleryAssetLink(Base):
