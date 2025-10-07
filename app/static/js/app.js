@@ -14,17 +14,33 @@ const state = {
     selectedAssets: [],
     source: 'feed',
   },
+  canvasScale: 1,
 };
 
 const conversationListEl = document.getElementById('conversation-list');
-const chatThreadEl = document.getElementById('chat-thread');
-const chatFormEl = document.getElementById('chat-form');
-const chatInputEl = document.getElementById('chat-input');
-const modelSelectEl = document.getElementById('model-select');
+let chatThreadEl = document.getElementById('chat-thread');
+let chatFormEl = document.getElementById('chat-form');
+let chatInputEl = document.getElementById('chat-input');
+let modelSelectEl = document.getElementById('model-select');
 const newConversationBtn = document.getElementById('new-conversation');
 const galleryEl = document.getElementById('gallery');
 const feedSearchEl = document.getElementById('feed-search');
 const feedTypeFilterEl = document.getElementById('feed-type-filter');
+
+const canvasWrapperEl = document.getElementById('canvas-wrapper');
+const canvasEl = document.getElementById('canvas');
+const canvasContentEl = document.getElementById('canvas-content');
+const zoomIndicatorEl = document.getElementById('zoom-indicator');
+const zoomButtons = document.querySelectorAll('[data-zoom]');
+const dropdownEl = document.querySelector('[data-dropdown]');
+const addWidgetBtn = document.getElementById('add-widget');
+const addWidgetOptions = dropdownEl ? dropdownEl.querySelectorAll('.dropdown__item') : [];
+const agentsPanelEl = document.getElementById('agents');
+const agentsToggleBtn = document.getElementById('agents-toggle');
+const agentsCloseBtn = document.getElementById('agents-close');
+
+let widgetZIndex = 10;
+let pointerInteraction = null;
 
 const studioEl = document.getElementById('studio');
 const studioToggleBtn = document.getElementById('studio-toggle');
@@ -67,23 +83,92 @@ async function fetchJSON(url, options) {
     const message = await res.text();
     throw new Error(message || 'Request failed');
   }
+  if (res.status === 204) {
+    return null;
+  }
   return res.json();
 }
 
+function bindChatWorkspace() {
+  const nextForm = document.getElementById('chat-form');
+  if (chatFormEl && chatFormEl !== nextForm) {
+    chatFormEl.removeEventListener('submit', sendMessage);
+  }
+  chatFormEl = nextForm;
+  chatThreadEl = document.getElementById('chat-thread');
+  chatInputEl = document.getElementById('chat-input');
+  modelSelectEl = document.getElementById('model-select');
+  if (chatFormEl) {
+    chatFormEl.addEventListener('submit', sendMessage);
+  }
+  if (chatThreadEl) {
+    if (state.currentConversationId) {
+      renderMessages(state.currentConversationId);
+    } else {
+      chatThreadEl.innerHTML = '';
+    }
+  }
+}
+
+function unbindChatWorkspace() {
+  if (chatFormEl) {
+    chatFormEl.removeEventListener('submit', sendMessage);
+  }
+  chatFormEl = null;
+  chatThreadEl = null;
+  chatInputEl = null;
+  modelSelectEl = null;
+}
+
 function renderConversations() {
+  if (!conversationListEl) return;
   conversationListEl.innerHTML = '';
   state.conversations.forEach((conversation) => {
     const li = document.createElement('li');
-    li.textContent = conversation.title;
     if (conversation.id === state.currentConversationId) {
       li.classList.add('active');
     }
-    li.addEventListener('click', () => selectConversation(conversation.id));
+    const titleButton = document.createElement('button');
+    titleButton.type = 'button';
+    titleButton.className = 'conversation-list__title';
+    titleButton.textContent = conversation.title;
+    titleButton.addEventListener('click', () => selectConversation(conversation.id));
+
+    const actions = document.createElement('div');
+    actions.className = 'conversation-list__actions';
+
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'conversation-list__btn';
+    editButton.title = 'Rename conversation';
+    editButton.setAttribute('aria-label', `Rename ${conversation.title}`);
+    editButton.textContent = '✎';
+    editButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      editConversation(conversation.id);
+    });
+
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'conversation-list__btn';
+    deleteButton.title = 'Delete conversation';
+    deleteButton.setAttribute('aria-label', `Delete ${conversation.title}`);
+    deleteButton.textContent = '🗑';
+    deleteButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      deleteConversation(conversation.id);
+    });
+
+    actions.appendChild(editButton);
+    actions.appendChild(deleteButton);
+    li.appendChild(titleButton);
+    li.appendChild(actions);
     conversationListEl.appendChild(li);
   });
 }
 
 function renderMessages(conversationId) {
+  if (!chatThreadEl) return;
   const messages = state.messages[conversationId] || [];
   chatThreadEl.innerHTML = '';
   if (!messages.length) {
@@ -134,8 +219,347 @@ async function createConversation() {
   await selectConversation(conversation.id);
 }
 
+async function editConversation(conversationId) {
+  const conversation = state.conversations.find((item) => item.id === conversationId);
+  if (!conversation) return;
+  const title = prompt('Rename conversation', conversation.title);
+  if (!title || title.trim() === conversation.title) return;
+  try {
+    const updated = await fetchJSON(`/api/conversations/${conversationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: title.trim() }),
+    });
+    const index = state.conversations.findIndex((item) => item.id === conversationId);
+    if (index !== -1 && updated) {
+      state.conversations[index] = updated;
+      state.conversations.sort(
+        (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+      );
+    }
+    renderConversations();
+  } catch (error) {
+    console.error(error);
+    alert('Unable to rename conversation.');
+  }
+}
+
+async function deleteConversation(conversationId) {
+  const conversation = state.conversations.find((item) => item.id === conversationId);
+  if (!conversation) return;
+  const confirmation = confirm(
+    `Delete conversation "${conversation.title}"? All related messages will be removed.`,
+  );
+  if (!confirmation) return;
+  try {
+    await fetchJSON(`/api/conversations/${conversationId}`, { method: 'DELETE' });
+  } catch (error) {
+    console.error(error);
+    alert('Unable to delete conversation.');
+    return;
+  }
+  state.conversations = state.conversations.filter((item) => item.id !== conversationId);
+  delete state.messages[conversationId];
+  if (state.currentConversationId === conversationId) {
+    state.currentConversationId = null;
+    if (state.conversations.length) {
+      await selectConversation(state.conversations[0].id);
+    } else if (chatThreadEl) {
+      chatThreadEl.innerHTML = '';
+    }
+  }
+  renderConversations();
+}
+
+function focusWidget(widget) {
+  if (!widget) return;
+  widgetZIndex += 1;
+  widget.style.zIndex = String(widgetZIndex);
+}
+
+function nextWidgetPosition() {
+  if (!canvasContentEl) return { left: 160, top: 160 };
+  const count = canvasContentEl.querySelectorAll('.widget').length;
+  const offset = (count % 6) * 32;
+  return { left: 160 + offset, top: 160 + offset };
+}
+
+function mountWidget(widget) {
+  if (!canvasContentEl || !widget) return widget;
+  if (!widget.style.left || !widget.style.top) {
+    const { left, top } = nextWidgetPosition();
+    widget.style.left = `${left}px`;
+    widget.style.top = `${top}px`;
+  }
+  canvasContentEl.appendChild(widget);
+  focusWidget(widget);
+  return widget;
+}
+
+function createChatWidget() {
+  let widget = document.getElementById('widget-chat');
+  if (widget) {
+    widget.classList.remove('is-minimized');
+    widget.hidden = false;
+    focusWidget(widget);
+    bindChatWorkspace();
+    return widget;
+  }
+  widget = document.createElement('section');
+  widget.id = 'widget-chat';
+  widget.dataset.widget = '';
+  widget.dataset.widgetType = 'chat';
+  widget.className = 'widget';
+  widget.style.width = '520px';
+  widget.style.height = '520px';
+  widget.style.left = '380px';
+  widget.style.top = '120px';
+  widget.innerHTML = `
+    <header class="widget__header" data-drag-handle>
+      <h2 class="widget__title">Chat workspace</h2>
+      <div class="widget__toolbar">
+        <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
+        <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
+      </div>
+    </header>
+    <div class="widget__body">
+      <div id="chat-thread" class="chat-thread"></div>
+      <form id="chat-form" class="chat-form">
+        <textarea
+          id="chat-input"
+          placeholder="Ask anything about your next product milestone..."
+        ></textarea>
+        <div class="chat-form__controls">
+          <select id="model-select">
+            <option value="gpt-5-chat-latest" selected>gpt-5-chat-latest</option>
+            <option value="gpt-4.1">gpt-4.1</option>
+            <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+            <option value="o4-mini">o4-mini</option>
+          </select>
+          <button type="submit" class="btn btn--primary">Send</button>
+        </div>
+      </form>
+    </div>
+    <div class="widget__resize" data-resize aria-hidden="true"></div>
+  `;
+  mountWidget(widget);
+  bindChatWorkspace();
+  return widget;
+}
+
+function createImageWidget() {
+  const widget = document.createElement('section');
+  widget.className = 'widget';
+  widget.dataset.widget = '';
+  widget.dataset.widgetType = 'image';
+  widget.style.width = '420px';
+  widget.style.height = '430px';
+  const { left, top } = nextWidgetPosition();
+  widget.style.left = `${left + 120}px`;
+  widget.style.top = `${top + 60}px`;
+  widget.innerHTML = `
+    <header class="widget__header" data-drag-handle>
+      <h2 class="widget__title">Image generator</h2>
+      <div class="widget__toolbar">
+        <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
+        <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
+      </div>
+    </header>
+    <div class="widget__body">
+      <form class="widget-form" data-image-form>
+        <label class="widget-field">
+          <span>Prompt</span>
+          <textarea name="prompt" placeholder="Describe the visual you're imagining..." required></textarea>
+        </label>
+        <div class="widget-form__row">
+          <label class="widget-field">
+            <span>Size</span>
+            <select name="size">
+              <option value="1024x1024">1024 × 1024</option>
+              <option value="512x512">512 × 512</option>
+              <option value="256x256">256 × 256</option>
+            </select>
+          </label>
+          <label class="widget-field">
+            <span>Quality</span>
+            <select name="quality">
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+        </div>
+        <button type="submit" class="btn btn--primary">Generate image</button>
+      </form>
+      <p class="widget__hint" data-status>Outputs land in the generative feed.</p>
+    </div>
+    <div class="widget__resize" data-resize aria-hidden="true"></div>
+  `;
+  mountWidget(widget);
+  const form = widget.querySelector('[data-image-form]');
+  const statusEl = widget.querySelector('[data-status]');
+  if (form) {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const formData = new FormData(form);
+      const prompt = String(formData.get('prompt') || '').trim();
+      if (!prompt) return;
+      const size = formData.get('size') || '1024x1024';
+      const quality = formData.get('quality') || 'high';
+      form.querySelector('button[type="submit"]').disabled = true;
+      if (statusEl) statusEl.textContent = 'Generating…';
+      try {
+        await fetchJSON('/api/images', {
+          method: 'POST',
+          body: JSON.stringify({
+            prompt,
+            size,
+            quality,
+            aspect_ratio: '1:1',
+          }),
+        });
+        form.reset();
+        if (statusEl) statusEl.textContent = 'Image created! Check the generative feed.';
+        await loadGallery();
+        await loadGalleries();
+      } catch (error) {
+        console.error(error);
+        if (statusEl) statusEl.textContent = 'Generation failed. Verify your API configuration.';
+      } finally {
+        const button = form.querySelector('button[type="submit"]');
+        if (button) button.disabled = false;
+      }
+    });
+  }
+  return widget;
+}
+
+function createVideoWidget() {
+  const widget = document.createElement('section');
+  widget.className = 'widget';
+  widget.dataset.widget = '';
+  widget.dataset.widgetType = 'video';
+  widget.style.width = '440px';
+  widget.style.height = '460px';
+  const { left, top } = nextWidgetPosition();
+  widget.style.left = `${left + 220}px`;
+  widget.style.top = `${top + 120}px`;
+  widget.innerHTML = `
+    <header class="widget__header" data-drag-handle>
+      <h2 class="widget__title">Video generator</h2>
+      <div class="widget__toolbar">
+        <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
+        <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
+      </div>
+    </header>
+    <div class="widget__body">
+      <form class="widget-form" data-video-form>
+        <label class="widget-field">
+          <span>Prompt</span>
+          <textarea name="prompt" placeholder="Direct a short product teaser..." required></textarea>
+        </label>
+        <div class="widget-form__row">
+          <label class="widget-field">
+            <span>Aspect ratio</span>
+            <select name="aspect_ratio">
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+            </select>
+          </label>
+          <label class="widget-field">
+            <span>Duration</span>
+            <input name="duration" type="number" min="2" max="60" value="8" />
+          </label>
+        </div>
+        <button type="submit" class="btn btn--primary">Generate video</button>
+      </form>
+      <p class="widget__hint" data-status>Your clips will appear in the feed once ready.</p>
+    </div>
+    <div class="widget__resize" data-resize aria-hidden="true"></div>
+  `;
+  mountWidget(widget);
+  const form = widget.querySelector('[data-video-form]');
+  const statusEl = widget.querySelector('[data-status]');
+  if (form) {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const formData = new FormData(form);
+      const prompt = String(formData.get('prompt') || '').trim();
+      if (!prompt) return;
+      const aspectRatio = formData.get('aspect_ratio') || '16:9';
+      const duration = Number(formData.get('duration')) || 8;
+      form.querySelector('button[type="submit"]').disabled = true;
+      if (statusEl) statusEl.textContent = 'Generating…';
+      try {
+        await fetchJSON('/api/videos', {
+          method: 'POST',
+          body: JSON.stringify({
+            prompt,
+            aspect_ratio: aspectRatio,
+            duration_seconds: duration,
+            quality: 'high',
+          }),
+        });
+        form.reset();
+        if (statusEl) statusEl.textContent = 'Video render queued!';
+        await loadGallery();
+        await loadGalleries();
+      } catch (error) {
+        console.error(error);
+        if (statusEl) statusEl.textContent = 'Generation failed. Check your server logs.';
+      } finally {
+        const button = form.querySelector('button[type="submit"]');
+        if (button) button.disabled = false;
+      }
+    });
+  }
+  return widget;
+}
+
+function createWorldWidget() {
+  const widget = document.createElement('section');
+  widget.className = 'widget';
+  widget.dataset.widget = '';
+  widget.dataset.widgetType = 'world';
+  widget.style.width = '420px';
+  widget.style.height = '400px';
+  const { left, top } = nextWidgetPosition();
+  widget.style.left = `${left + 260}px`;
+  widget.style.top = `${top + 160}px`;
+  widget.innerHTML = `
+    <header class="widget__header" data-drag-handle>
+      <h2 class="widget__title">3D world creator</h2>
+      <div class="widget__toolbar">
+        <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
+        <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
+      </div>
+    </header>
+    <div class="widget__body">
+      <p class="widget__hint">Sketch ideas for immersive spaces and keep notes synced for future API hooks.</p>
+      <textarea class="widget-note" placeholder="Outline your world, actors, and core interactions..."></textarea>
+      <button type="button" class="btn btn--primary" data-save-world>Save concept</button>
+      <p class="widget__hint" data-status>This concept saves locally for now. Database sync coming soon.</p>
+    </div>
+    <div class="widget__resize" data-resize aria-hidden="true"></div>
+  `;
+  mountWidget(widget);
+  const saveButton = widget.querySelector('[data-save-world]');
+  const statusEl = widget.querySelector('[data-status]');
+  if (saveButton) {
+    saveButton.addEventListener('click', () => {
+      if (statusEl) {
+        statusEl.textContent = 'Concept noted! Future releases will persist this to the database.';
+      }
+    });
+  }
+  return widget;
+}
+
 async function sendMessage(event) {
   event.preventDefault();
+  if (!chatInputEl || !chatThreadEl || !modelSelectEl) {
+    return;
+  }
   if (!state.currentConversationId) {
     await createConversation();
     if (!state.currentConversationId) return;
@@ -778,36 +1202,295 @@ function initialiseStudioNavigation() {
   setStudioView('generate');
 }
 
-newConversationBtn.addEventListener('click', createConversation);
-chatFormEl.addEventListener('submit', sendMessage);
-feedSearchEl.addEventListener('input', handleFeedSearch);
-feedTypeFilterEl.addEventListener('change', handleFeedTypeChange);
-studioToggleBtn.addEventListener('click', () => toggleStudio(true));
-studioCloseBtn.addEventListener('click', () => toggleStudio(false));
-studioGenerateForm.addEventListener('submit', handleGenerateAsset);
-studioAssetTypeEl.addEventListener('change', () => {
-  syncDurationVisibility();
-});
-studioGalleryForm.addEventListener('submit', handleCreateGallery);
-studioGallerySearchEl.addEventListener('input', handleGallerySearch);
-studioGalleryFilterEl.addEventListener('change', handleGalleryFilter);
-composerGallerySelectEl.addEventListener('change', (event) => {
-  handleComposerSourceChange(event);
-});
-composerRenderBtn.addEventListener('click', handleComposerRender);
-composerClearBtn.addEventListener('click', () => {
-  state.composer.selectedAssets = [];
-  renderComposerTimeline();
-  renderComposerLibrary();
+function setCanvasScale(scale) {
+  const bounded = Math.min(2, Math.max(0.5, scale));
+  state.canvasScale = bounded;
+  if (canvasContentEl) {
+    canvasContentEl.style.transform = `scale(${bounded})`;
+  }
+  if (zoomIndicatorEl) {
+    zoomIndicatorEl.textContent = `${Math.round(bounded * 100)}%`;
+  }
+}
+
+function handleZoomButton(event) {
+  const action = event.currentTarget.dataset.zoom;
+  if (action === 'in') {
+    setCanvasScale(state.canvasScale * 1.1);
+  } else if (action === 'out') {
+    setCanvasScale(state.canvasScale * 0.9);
+  } else if (action === 'reset') {
+    setCanvasScale(1);
+  }
+}
+
+function handleCanvasWheel(event) {
+  if (!canvasWrapperEl) return;
+  event.preventDefault();
+  const direction = event.deltaY > 0 ? 0.9 : 1.1;
+  setCanvasScale(state.canvasScale * direction);
+}
+
+function setDropdownOpen(isOpen) {
+  if (!dropdownEl) return;
+  dropdownEl.classList.toggle('is-open', isOpen);
+  const menu = dropdownEl.querySelector('.dropdown__menu');
+  if (menu) {
+    menu.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+  if (addWidgetBtn) {
+    addWidgetBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+}
+
+function toggleDropdown() {
+  if (!dropdownEl) return;
+  const isOpen = dropdownEl.classList.contains('is-open');
+  setDropdownOpen(!isOpen);
+}
+
+function handleDocumentClick(event) {
+  if (dropdownEl && !dropdownEl.contains(event.target)) {
+    setDropdownOpen(false);
+  }
+}
+
+function handleAddWidget(type) {
+  switch (type) {
+    case 'chat':
+      createChatWidget();
+      break;
+    case 'image':
+      createImageWidget();
+      break;
+    case 'video':
+      createVideoWidget();
+      break;
+    case 'world':
+      createWorldWidget();
+      break;
+    default:
+      break;
+  }
+}
+
+function handleAddWidgetOption(event) {
+  const type = event.currentTarget.dataset.widgetType;
+  if (!type) return;
+  handleAddWidget(type);
+  setDropdownOpen(false);
+}
+
+function handleWidgetAction(event) {
+  const actionButton = event.target.closest('[data-action]');
+  if (!actionButton) return;
+  const widget = actionButton.closest('.widget');
+  if (!widget) return;
+  const action = actionButton.dataset.action;
+  if (action === 'minimize') {
+    widget.classList.toggle('is-minimized');
+  } else if (action === 'close') {
+    if (widget.dataset.lockClose === 'true') return;
+    if (widget.id === 'widget-chat') {
+      unbindChatWorkspace();
+    }
+    widget.remove();
+  }
+}
+
+function handlePointerDown(event) {
+  if (!canvasContentEl || event.button !== 0) return;
+  const widget = event.target.closest('.widget');
+  if (!widget) return;
+  focusWidget(widget);
+  const resizeHandle = event.target.closest('[data-resize]');
+  if (resizeHandle) {
+    event.preventDefault();
+    pointerInteraction = {
+      type: 'resize',
+      widget,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      initialWidth: widget.offsetWidth,
+      initialHeight: widget.offsetHeight,
+    };
+    widget.setPointerCapture(event.pointerId);
+    return;
+  }
+
+  const toolbar = event.target.closest('.widget__toolbar');
+  const dragHandle = event.target.closest('[data-drag-handle]');
+  if (dragHandle && !toolbar) {
+    event.preventDefault();
+    pointerInteraction = {
+      type: 'drag',
+      widget,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      initialLeft: parseFloat(widget.style.left) || widget.offsetLeft,
+      initialTop: parseFloat(widget.style.top) || widget.offsetTop,
+    };
+    widget.setPointerCapture(event.pointerId);
+  }
+}
+
+function handlePointerMove(event) {
+  if (!pointerInteraction || event.pointerId !== pointerInteraction.pointerId) return;
+  const scale = state.canvasScale || 1;
+  if (pointerInteraction.type === 'drag') {
+    const deltaX = (event.clientX - pointerInteraction.startX) / scale;
+    const deltaY = (event.clientY - pointerInteraction.startY) / scale;
+    pointerInteraction.widget.style.left = `${pointerInteraction.initialLeft + deltaX}px`;
+    pointerInteraction.widget.style.top = `${pointerInteraction.initialTop + deltaY}px`;
+  } else if (pointerInteraction.type === 'resize') {
+    const deltaX = (event.clientX - pointerInteraction.startX) / scale;
+    const deltaY = (event.clientY - pointerInteraction.startY) / scale;
+    const width = Math.max(280, pointerInteraction.initialWidth + deltaX);
+    const height = Math.max(220, pointerInteraction.initialHeight + deltaY);
+    pointerInteraction.widget.style.width = `${width}px`;
+    pointerInteraction.widget.style.height = `${height}px`;
+  }
+}
+
+function handlePointerUp(event) {
+  if (!pointerInteraction || event.pointerId !== pointerInteraction.pointerId) return;
+  if (pointerInteraction.widget) {
+    try {
+      pointerInteraction.widget.releasePointerCapture(pointerInteraction.pointerId);
+    } catch (error) {
+      // Pointer might already be released if the widget was removed.
+    }
+  }
+  pointerInteraction = null;
+}
+
+function toggleAgents(open) {
+  if (!agentsPanelEl) return;
+  const isOpen = open ?? !agentsPanelEl.classList.contains('is-open');
+  agentsPanelEl.classList.toggle('is-open', Boolean(isOpen));
+  agentsPanelEl.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+}
+
+function initialiseWidgets() {
+  if (!canvasContentEl) return;
+  canvasContentEl.querySelectorAll('.widget').forEach((widget) => {
+    widgetZIndex += 1;
+    widget.style.zIndex = String(widgetZIndex);
+  });
+}
+
+if (newConversationBtn) {
+  newConversationBtn.addEventListener('click', createConversation);
+}
+
+if (feedSearchEl) {
+  feedSearchEl.addEventListener('input', handleFeedSearch);
+}
+
+if (feedTypeFilterEl) {
+  feedTypeFilterEl.addEventListener('change', handleFeedTypeChange);
+}
+
+if (studioToggleBtn) {
+  studioToggleBtn.addEventListener('click', () => toggleStudio(true));
+}
+
+if (studioCloseBtn) {
+  studioCloseBtn.addEventListener('click', () => toggleStudio(false));
+}
+
+if (studioGenerateForm) {
+  studioGenerateForm.addEventListener('submit', handleGenerateAsset);
+}
+
+if (studioAssetTypeEl) {
+  studioAssetTypeEl.addEventListener('change', () => {
+    syncDurationVisibility();
+  });
+}
+
+if (studioGalleryForm) {
+  studioGalleryForm.addEventListener('submit', handleCreateGallery);
+}
+
+if (studioGallerySearchEl) {
+  studioGallerySearchEl.addEventListener('input', handleGallerySearch);
+}
+
+if (studioGalleryFilterEl) {
+  studioGalleryFilterEl.addEventListener('change', handleGalleryFilter);
+}
+
+if (composerGallerySelectEl) {
+  composerGallerySelectEl.addEventListener('change', handleComposerSourceChange);
+}
+
+if (composerRenderBtn) {
+  composerRenderBtn.addEventListener('click', handleComposerRender);
+}
+
+if (composerClearBtn) {
+  composerClearBtn.addEventListener('click', () => {
+    state.composer.selectedAssets = [];
+    renderComposerTimeline();
+    renderComposerLibrary();
+  });
+}
+
+zoomButtons.forEach((button) => {
+  button.addEventListener('click', handleZoomButton);
 });
 
+if (addWidgetBtn) {
+  addWidgetBtn.addEventListener('click', toggleDropdown);
+}
+
+addWidgetOptions.forEach((option) => {
+  option.addEventListener('click', handleAddWidgetOption);
+});
+
+if (canvasContentEl) {
+  canvasContentEl.addEventListener('pointerdown', handlePointerDown);
+  canvasContentEl.addEventListener('click', handleWidgetAction);
+}
+
+if (canvasWrapperEl) {
+  canvasWrapperEl.addEventListener('wheel', handleCanvasWheel, { passive: false });
+}
+
+window.addEventListener('pointermove', handlePointerMove);
+window.addEventListener('pointerup', handlePointerUp);
+
+document.addEventListener('click', handleDocumentClick);
+
+if (agentsToggleBtn) {
+  agentsToggleBtn.addEventListener('click', () => toggleAgents(true));
+}
+
+if (agentsCloseBtn) {
+  agentsCloseBtn.addEventListener('click', () => toggleAgents(false));
+}
+
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && studioEl.classList.contains('is-open')) {
-    toggleStudio(false);
+  if (event.key === 'Escape') {
+    if (studioEl && studioEl.classList.contains('is-open')) {
+      toggleStudio(false);
+      return;
+    }
+    if (agentsPanelEl && agentsPanelEl.classList.contains('is-open')) {
+      toggleAgents(false);
+      return;
+    }
+    setDropdownOpen(false);
   }
 });
 
 initialiseStudioNavigation();
+bindChatWorkspace();
+initialiseWidgets();
+setCanvasScale(state.canvasScale);
 syncDurationVisibility();
 loadConversations();
 loadGallery();

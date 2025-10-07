@@ -24,6 +24,7 @@ from .openai_client import OpenAIMegaClient
 from .schemas import (
     ConversationCreate,
     ConversationRead,
+    ConversationUpdate,
     GalleryAssetAssignment,
     GalleryAssetCreate,
     GalleryAssetRead,
@@ -82,11 +83,45 @@ def list_conversations(db=Depends(get_db)):
     status_code=status.HTTP_201_CREATED,
 )
 def create_conversation(payload: ConversationCreate, db=Depends(get_db)):
-    conversation = Conversation(title=payload.title)
+    clean_title = payload.title.strip()
+    if not clean_title:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Title cannot be empty")
+    conversation = Conversation(title=clean_title)
     db.add(conversation)
     db.flush()
     db.refresh(conversation)
     return conversation
+
+
+@app.patch("/api/conversations/{conversation_id}", response_model=ConversationRead)
+def update_conversation(
+    conversation_id: int, payload: ConversationUpdate, db=Depends(get_db)
+):
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    clean_title = payload.title.strip()
+    if not clean_title:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Title cannot be empty",
+        )
+
+    conversation.title = clean_title
+    conversation.updated_at = datetime.utcnow()
+    db.flush()
+    db.refresh(conversation)
+    return conversation
+
+
+@app.delete("/api/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation(conversation_id: int, db=Depends(get_db)):
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    db.delete(conversation)
+    return None
 
 
 @app.get(
