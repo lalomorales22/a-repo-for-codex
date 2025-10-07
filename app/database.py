@@ -5,8 +5,23 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Generator
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+)
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+    sessionmaker,
+)
 
 from .config import get_settings
 
@@ -64,6 +79,52 @@ class GalleryAsset(Base):
     description: Mapped[str] = mapped_column(Text, nullable=True)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_json: Mapped[str] = mapped_column(Text, nullable=True)
+
+    galleries: Mapped[list["Gallery"]] = relationship(
+        "Gallery",
+        secondary="gallery_asset_links",
+        back_populates="assets",
+    )
+
+    @property
+    def gallery_ids(self) -> list[int]:
+        return [gallery.id for gallery in self.galleries]
+
+
+class Gallery(Base):
+    """Curated collection of generated assets."""
+
+    __tablename__ = "galleries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(120), nullable=True)
+    accent_color: Mapped[str] = mapped_column(String(16), nullable=True)
+    layout: Mapped[str] = mapped_column(String(64), nullable=True)
+
+    assets: Mapped[list[GalleryAsset]] = relationship(
+        "GalleryAsset",
+        secondary="gallery_asset_links",
+        back_populates="galleries",
+        order_by="GalleryAsset.created_at.desc()",
+    )
+
+    @property
+    def asset_count(self) -> int:
+        return len(self.assets)
+
+
+class GalleryAssetLink(Base):
+    """Association table between galleries and assets."""
+
+    __tablename__ = "gallery_asset_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    gallery_id: Mapped[int] = mapped_column(ForeignKey("galleries.id", ondelete="CASCADE"))
+    asset_id: Mapped[int] = mapped_column(ForeignKey("gallery_assets.id", ondelete="CASCADE"))
+
+    __table_args__ = (UniqueConstraint("gallery_id", "asset_id", name="uq_gallery_asset"),)
 
 
 _settings = get_settings()
