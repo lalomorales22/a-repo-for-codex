@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 mega_app.db
 .env
+venv/
+.gitignore
