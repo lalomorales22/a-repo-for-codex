@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import json
+from datetime import datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -149,3 +151,48 @@ class StudioRenderRequest(BaseModel):
 
 class StudioRenderResponse(BaseModel):
     asset: GalleryAssetRead
+
+
+class AgentBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    mission: str = Field(..., min_length=1)
+    instructions: str = Field(..., min_length=1)
+    capabilities: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    workflow: Optional[str] = None
+
+
+class AgentCreate(AgentBase):
+    pass
+
+
+class AgentUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    mission: Optional[str] = Field(default=None, min_length=1)
+    instructions: Optional[str] = Field(default=None, min_length=1)
+    capabilities: Optional[list[str]] = None
+    tools: Optional[list[str]] = None
+    workflow: Optional[str] = None
+
+
+class AgentRead(AgentBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AgentPlan(AgentBase):
+    rationale: Optional[str] = None
+
+
+class AgentBuildRequest(BaseModel):
+    prompt: str = Field(..., min_length=1)
+    context: Optional[str] = None
+
+
+class AgentBuildResponse(BaseModel):
+    plan: AgentPlan
+    message: str = Field(default="Generated using OpenAI planning tools")

@@ -1,6 +1,7 @@
 """Wrapper around the OpenAI SDK using the latest responses API."""
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable
 
 from openai import OpenAI, OpenAIError
@@ -96,7 +97,7 @@ class OpenAIMegaClient:
             )
         except OpenAIError as exc:  # pragma: no cover - best effort guard
             return {
-                "url": f"https://placehold.co/600x600?text=OpenAI+API+error",
+                "url": "https://placehold.co/600x600?text=OpenAI+API+error",
                 "revised_prompt": f"{prompt} (error: {exc})",
                 "model": "gpt-image-1",
             }
@@ -180,3 +181,114 @@ class OpenAIMegaClient:
             "quality": quality,
             "revised_prompt": storyboard,
         }
+
+    def plan_agent(self, prompt: str) -> dict[str, Any]:
+        """Create an agent blueprint by prompting the Responses API."""
+
+        baseline = {
+            "name": "Product Ops Companion",
+            "mission": "Automate product rituals and prepare stakeholder-ready briefs.",
+            "instructions": (
+                "You are a meticulous product operations agent. Structure updates, uncover risks, "
+                "and surface next steps with crisp, executive-ready language."
+            ),
+            "capabilities": [
+                "Summarise research, feedback, and roadmap updates",
+                "Highlight blockers across engineering, design, and GTM",
+                "Draft follow-up actions with owners and deadlines",
+            ],
+            "tools": [
+                "Notion knowledge base",
+                "Jira issue tracker",
+                "Calendar availability API",
+            ],
+            "workflow": (
+                "1. Gather the latest notes, tickets, and KPIs.\n"
+                "2. Generate a concise update tailored to the audience.\n"
+                "3. Suggest actions, owners, and timelines.\n"
+                "4. Log decisions back to the workspace for traceability."
+            ),
+            "rationale": (
+                "Designed as a baseline response when the OpenAI API isn't configured."
+            ),
+        }
+
+        if self._client is None:
+            return baseline
+
+        instructions = (
+            "You are an expert OpenAI agent architect. Given a product or operations brief, "
+            "design an autonomous agent. Respond strictly as minified JSON with the keys "
+            "name, mission, instructions, capabilities (array of strings), tools (array of strings), "
+            "workflow (string) and rationale (string). Ensure arrays are concise."
+        )
+
+        try:
+            response = self._client.responses.create(
+                model="gpt-5-chat-latest",
+                input=[
+                    {
+                        "role": "system",
+                        "content": [{"type": "input_text", "text": instructions}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": prompt,
+                            }
+                        ],
+                    },
+                ],
+            )
+        except OpenAIError:
+            return baseline
+
+        output_text = ""
+        if getattr(response, "output", None):
+            output_text = response.output[0].content[0].text
+        else:
+            raw = getattr(response, "output_text", "")
+            if isinstance(raw, list):
+                output_text = "".join(raw)
+            else:
+                output_text = raw or ""
+
+        try:
+            parsed = json.loads(output_text)
+            if isinstance(parsed, dict):
+                capabilities = parsed.get("capabilities")
+                if isinstance(capabilities, list):
+                    capabilities_list = [
+                        str(item).strip() for item in capabilities if str(item).strip()
+                    ]
+                else:
+                    capabilities_list = baseline["capabilities"]
+
+                tools = parsed.get("tools")
+                if isinstance(tools, list):
+                    tools_list = [str(item).strip() for item in tools if str(item).strip()]
+                else:
+                    tools_list = baseline["tools"]
+
+                workflow = parsed.get("workflow")
+                workflow_text = workflow.strip() if isinstance(workflow, str) else None
+                rationale = parsed.get("rationale")
+                rationale_text = rationale.strip() if isinstance(rationale, str) else None
+
+                return {
+                    "name": (parsed.get("name") or baseline["name"]).strip(),
+                    "mission": (parsed.get("mission") or baseline["mission"]).strip(),
+                    "instructions": (
+                        parsed.get("instructions") or baseline["instructions"]
+                    ).strip(),
+                    "capabilities": capabilities_list or baseline["capabilities"],
+                    "tools": tools_list or baseline["tools"],
+                    "workflow": workflow_text or baseline["workflow"],
+                    "rationale": rationale_text or baseline["rationale"],
+                }
+        except (TypeError, ValueError):
+            pass
+
+        return baseline

@@ -15,6 +15,9 @@ const state = {
     source: 'feed',
   },
   canvasScale: 1,
+  agents: [],
+  currentAgentId: null,
+  agentPlan: null,
 };
 
 const conversationListEl = document.getElementById('conversation-list');
@@ -38,6 +41,22 @@ const addWidgetOptions = dropdownEl ? dropdownEl.querySelectorAll('.dropdown__it
 const agentsPanelEl = document.getElementById('agents');
 const agentsToggleBtn = document.getElementById('agents-toggle');
 const agentsCloseBtn = document.getElementById('agents-close');
+const studioStatusEl = document.getElementById('studio-generate-status');
+const studioPreviewEl = document.getElementById('studio-generate-preview');
+const agentsCountEl = document.getElementById('agents-count');
+const agentsListEl = document.getElementById('agents-list');
+const agentDetailPanelEl = document.getElementById('agent-detail');
+const agentBuilderForm = document.getElementById('agent-builder-form');
+const agentBuilderPromptEl = document.getElementById('agent-builder-prompt');
+const agentBuilderContextEl = document.getElementById('agent-builder-context');
+const agentBuilderStatusEl = document.getElementById('agent-builder-status');
+const agentBuilderClearBtn = document.getElementById('agent-builder-clear');
+const agentNewFromPlanBtn = document.getElementById('agents-new-from-plan');
+const agentPlanEl = document.getElementById('agent-plan');
+const agentPlanNameEl = document.getElementById('agent-plan-name');
+const agentPlanDetailsEl = document.getElementById('agent-plan-details');
+const agentPlanSaveBtn = document.getElementById('agent-plan-save');
+const agentPlanDismissBtn = document.getElementById('agent-plan-dismiss');
 
 let widgetZIndex = 10;
 let pointerInteraction = null;
@@ -555,6 +574,41 @@ function createWorldWidget() {
   return widget;
 }
 
+function createAgentWidget() {
+  const widget = document.createElement('section');
+  widget.className = 'widget';
+  widget.dataset.widget = '';
+  widget.dataset.widgetType = 'agent';
+  widget.style.width = '420px';
+  widget.style.height = '380px';
+  const { left, top } = nextWidgetPosition();
+  widget.style.left = `${left + 120}px`;
+  widget.style.top = `${top + 200}px`;
+  widget.innerHTML = `
+    <header class="widget__header" data-drag-handle>
+      <h2 class="widget__title">Agents roster</h2>
+      <div class="widget__toolbar">
+        <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
+        <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
+      </div>
+    </header>
+    <div class="widget__body">
+      <p class="widget__hint">Monitor automation teammates and jump into the full workspace.</p>
+      <ul class="agents-widget__list" data-agent-widget-list></ul>
+      <p class="widget__hint" data-agent-widget-empty hidden>No agents yet. Launch one with the AI builder.</p>
+      <button type="button" class="btn btn--primary" data-open-agents>Open agents workspace</button>
+    </div>
+    <div class="widget__resize" data-resize aria-hidden="true"></div>
+  `;
+  mountWidget(widget);
+  const openButton = widget.querySelector('[data-open-agents]');
+  if (openButton) {
+    openButton.addEventListener('click', () => toggleAgents(true));
+  }
+  renderAgentWidgets();
+  return widget;
+}
+
 async function sendMessage(event) {
   event.preventDefault();
   if (!chatInputEl || !chatThreadEl || !modelSelectEl) {
@@ -708,6 +762,7 @@ async function loadGallery() {
   renderGallery();
   renderComposerLibrary();
   renderComposerTimeline();
+  renderStudioPreview();
 }
 
 function toggleStudio(open) {
@@ -737,11 +792,74 @@ function syncDurationVisibility() {
   studioDurationField.style.display = type === 'video' ? 'block' : 'none';
 }
 
+function setStudioStatus(stateName, message) {
+  if (!studioStatusEl) return;
+  studioStatusEl.textContent = message || '';
+  studioStatusEl.classList.remove('is-loading', 'is-success', 'is-error');
+  if (stateName) {
+    studioStatusEl.classList.add(`is-${stateName}`);
+  }
+}
+
+function renderStudioPreview() {
+  if (!studioPreviewEl) return;
+  studioPreviewEl.innerHTML = '';
+
+  if (!state.assets.length) {
+    const empty = document.createElement('p');
+    empty.className = 'studio-preview__meta';
+    empty.textContent = 'Generate an asset to see a quick preview here.';
+    studioPreviewEl.appendChild(empty);
+    return;
+  }
+
+  const latest = state.assets[0];
+  const card = document.createElement('article');
+  card.className = 'studio-preview__card';
+
+  let media;
+  if (latest.asset_type === 'video') {
+    media = document.createElement('video');
+    media.src = latest.url;
+    media.className = 'studio-preview__media';
+    media.muted = true;
+    media.loop = true;
+    media.autoplay = true;
+    media.playsInline = true;
+  } else {
+    media = document.createElement('img');
+    media.src = latest.url;
+    media.alt = latest.title || 'Generated asset';
+    media.className = 'studio-preview__media';
+  }
+
+  const title = document.createElement('h4');
+  title.className = 'studio-preview__title';
+  title.textContent = latest.title || 'Generated asset';
+
+  const meta = document.createElement('p');
+  meta.className = 'studio-preview__meta';
+  meta.textContent =
+    latest.description ||
+    `Saved to feed • ${latest.asset_type === 'video' ? 'Video' : 'Image'} asset`;
+
+  card.appendChild(media);
+  card.appendChild(title);
+  card.appendChild(meta);
+  studioPreviewEl.appendChild(card);
+}
+
 async function handleGenerateAsset(event) {
   event.preventDefault();
   const prompt = studioPromptEl.value.trim();
   if (!prompt) return;
   const type = studioAssetTypeEl.value;
+  const submitButton = studioGenerateForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  setStudioStatus(
+    'loading',
+    type === 'video' ? 'Generating video storyboard…' : 'Generating image asset…'
+  );
   try {
     if (type === 'video') {
       await fetchJSON('/api/videos', {
@@ -773,9 +891,12 @@ async function handleGenerateAsset(event) {
     syncDurationVisibility();
     await loadGallery();
     await loadGalleries();
+    setStudioStatus('success', 'Asset saved to the feed.');
   } catch (error) {
     console.error(error);
-    alert('Generation failed. Ensure your API key is configured.');
+    setStudioStatus('error', 'Generation failed. Check your API configuration.');
+  } finally {
+    if (submitButton) submitButton.disabled = false;
   }
 }
 
@@ -788,6 +909,459 @@ async function loadGalleries() {
   renderStudioGalleries();
   renderComposerLibrary();
   populateComposerSources();
+}
+
+function renderAgentWidgets() {
+  const widgets = document.querySelectorAll('[data-widget-type="agent"]');
+  widgets.forEach((widget) => {
+    const listEl = widget.querySelector('[data-agent-widget-list]');
+    const emptyEl = widget.querySelector('[data-agent-widget-empty]');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    if (!state.agents.length) {
+      if (emptyEl) emptyEl.removeAttribute('hidden');
+      return;
+    }
+    if (emptyEl) emptyEl.setAttribute('hidden', 'hidden');
+    state.agents.slice(0, 4).forEach((agent) => {
+      const item = document.createElement('li');
+      item.className = 'agents-widget__item';
+
+      const title = document.createElement('h4');
+      title.textContent = agent.name;
+
+      const meta = document.createElement('p');
+      meta.className = 'agents-widget__meta';
+      meta.textContent = agent.mission;
+
+      item.appendChild(title);
+      item.appendChild(meta);
+      listEl.appendChild(item);
+    });
+  });
+}
+
+function renderAgentsList() {
+  if (agentsCountEl) {
+    const total = state.agents.length;
+    agentsCountEl.textContent = total === 1 ? '1 active' : `${total} active`;
+  }
+  if (!agentsListEl) return;
+  agentsListEl.innerHTML = '';
+
+  if (!state.agents.length) {
+    const empty = document.createElement('li');
+    empty.className = 'agents-empty';
+    empty.textContent = 'No agents yet. Use the AI builder to create your first teammate.';
+    agentsListEl.appendChild(empty);
+    return;
+  }
+
+  state.agents.forEach((agent) => {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'agents-list__item';
+    if (agent.id === state.currentAgentId) {
+      button.classList.add('is-active');
+    }
+
+    const title = document.createElement('h4');
+    title.textContent = agent.name;
+
+    const summary = document.createElement('p');
+    summary.textContent = agent.mission;
+
+    button.appendChild(title);
+    button.appendChild(summary);
+    button.addEventListener('click', () => selectAgent(agent.id));
+    item.appendChild(button);
+    agentsListEl.appendChild(item);
+  });
+}
+
+function selectAgent(agentId) {
+  state.currentAgentId = agentId;
+  renderAgentsList();
+  renderAgentDetail();
+}
+
+function prefillBuilderFromAgent(agent) {
+  if (!agentBuilderPromptEl) return;
+  const sections = [
+    `Name: ${agent.name}`,
+    `Mission: ${agent.mission}`,
+    `Instructions: ${agent.instructions}`,
+    agent.capabilities?.length ? `Capabilities: ${agent.capabilities.join(', ')}` : null,
+    agent.tools?.length ? `Tools: ${agent.tools.join(', ')}` : null,
+    agent.workflow ? `Workflow:\n${agent.workflow}` : null,
+  ].filter(Boolean);
+  agentBuilderPromptEl.value = `Refine this agent to make it more impactful:\n${sections.join('\n')}`;
+  if (agentBuilderContextEl) {
+    agentBuilderContextEl.value = agent.workflow || '';
+  }
+  state.agentPlan = null;
+  renderAgentPlan();
+  agentBuilderPromptEl.focus();
+  agentBuilderPromptEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function renderAgentDetail() {
+  if (!agentDetailPanelEl) return;
+  agentDetailPanelEl.innerHTML = '';
+
+  if (!state.agents.length) {
+    const empty = document.createElement('div');
+    empty.className = 'agents-empty';
+    empty.textContent = 'Blueprint an agent with the AI builder to start orchestrating work.';
+    agentDetailPanelEl.appendChild(empty);
+    return;
+  }
+
+  let agent = state.agents.find((item) => item.id === state.currentAgentId);
+  if (!agent) {
+    agent = state.agents[0];
+    state.currentAgentId = agent.id;
+  }
+
+  const header = document.createElement('div');
+  header.className = 'agents-detail__header';
+  const title = document.createElement('h3');
+  title.textContent = agent.name;
+  const refineButton = document.createElement('button');
+  refineButton.type = 'button';
+  refineButton.className = 'btn btn--ghost btn--sm';
+  refineButton.textContent = 'Edit with AI';
+  refineButton.addEventListener('click', () => prefillBuilderFromAgent(agent));
+  header.appendChild(title);
+  header.appendChild(refineButton);
+
+  const mission = document.createElement('p');
+  mission.className = 'agents-detail__meta';
+  mission.textContent = agent.mission;
+
+  const form = document.createElement('form');
+  form.className = 'agents-detail__form';
+  form.dataset.agentId = String(agent.id);
+
+  const nameRow = document.createElement('div');
+  nameRow.className = 'agents-detail__row';
+  const nameLabel = document.createElement('label');
+  nameLabel.textContent = 'Agent name';
+  const nameInput = document.createElement('input');
+  nameInput.name = 'name';
+  nameInput.value = agent.name;
+  nameRow.appendChild(nameLabel);
+  nameRow.appendChild(nameInput);
+
+  const missionRow = document.createElement('div');
+  missionRow.className = 'agents-detail__row';
+  const missionLabel = document.createElement('label');
+  missionLabel.textContent = 'Mission';
+  const missionInput = document.createElement('textarea');
+  missionInput.name = 'mission';
+  missionInput.value = agent.mission;
+  missionRow.appendChild(missionLabel);
+  missionRow.appendChild(missionInput);
+
+  const instructionsRow = document.createElement('div');
+  instructionsRow.className = 'agents-detail__row';
+  const instructionsLabel = document.createElement('label');
+  instructionsLabel.textContent = 'System instructions';
+  const instructionsInput = document.createElement('textarea');
+  instructionsInput.name = 'instructions';
+  instructionsInput.value = agent.instructions;
+  instructionsRow.appendChild(instructionsLabel);
+  instructionsRow.appendChild(instructionsInput);
+
+  const capabilitiesRow = document.createElement('div');
+  capabilitiesRow.className = 'agents-detail__row';
+  const capabilitiesLabel = document.createElement('label');
+  capabilitiesLabel.textContent = 'Capabilities (one per line)';
+  const capabilitiesInput = document.createElement('textarea');
+  capabilitiesInput.name = 'capabilities';
+  capabilitiesInput.value = (agent.capabilities || []).join('\n');
+  capabilitiesRow.appendChild(capabilitiesLabel);
+  capabilitiesRow.appendChild(capabilitiesInput);
+
+  const toolsRow = document.createElement('div');
+  toolsRow.className = 'agents-detail__row';
+  const toolsLabel = document.createElement('label');
+  toolsLabel.textContent = 'Tools (one per line)';
+  const toolsInput = document.createElement('textarea');
+  toolsInput.name = 'tools';
+  toolsInput.value = (agent.tools || []).join('\n');
+  toolsRow.appendChild(toolsLabel);
+  toolsRow.appendChild(toolsInput);
+
+  const workflowRow = document.createElement('div');
+  workflowRow.className = 'agents-detail__row';
+  const workflowLabel = document.createElement('label');
+  workflowLabel.textContent = 'Workflow';
+  const workflowInput = document.createElement('textarea');
+  workflowInput.name = 'workflow';
+  workflowInput.value = agent.workflow || '';
+  workflowRow.appendChild(workflowLabel);
+  workflowRow.appendChild(workflowInput);
+
+  const actions = document.createElement('div');
+  actions.className = 'agents-detail__actions';
+  const saveButton = document.createElement('button');
+  saveButton.type = 'submit';
+  saveButton.className = 'btn btn--primary';
+  saveButton.textContent = 'Save changes';
+  const status = document.createElement('span');
+  status.className = 'agents-status';
+  status.dataset.agentStatus = 'true';
+  actions.appendChild(saveButton);
+  actions.appendChild(status);
+
+  form.appendChild(nameRow);
+  form.appendChild(missionRow);
+  form.appendChild(instructionsRow);
+  form.appendChild(capabilitiesRow);
+  form.appendChild(toolsRow);
+  form.appendChild(workflowRow);
+  form.appendChild(actions);
+  form.addEventListener('submit', handleAgentUpdate);
+
+  agentDetailPanelEl.appendChild(header);
+  agentDetailPanelEl.appendChild(mission);
+  agentDetailPanelEl.appendChild(form);
+}
+
+function renderAgentPlan() {
+  if (!agentPlanEl || !agentPlanNameEl || !agentPlanDetailsEl) return;
+  if (!state.agentPlan) {
+    agentPlanEl.hidden = true;
+    agentPlanNameEl.textContent = '';
+    agentPlanDetailsEl.innerHTML = '';
+    if (agentPlanSaveBtn) agentPlanSaveBtn.disabled = true;
+    return;
+  }
+
+  const plan = state.agentPlan;
+  agentPlanEl.hidden = false;
+  agentPlanNameEl.textContent = plan.name;
+  agentPlanDetailsEl.innerHTML = '';
+
+  const entries = [
+    ['Mission', plan.mission],
+    ['Instructions', plan.instructions],
+    [
+      'Capabilities',
+      plan.capabilities?.length ? `• ${plan.capabilities.join('\n• ')}` : 'None provided',
+    ],
+    ['Tools', plan.tools?.length ? `• ${plan.tools.join('\n• ')}` : 'None provided'],
+    ['Workflow', plan.workflow || '—'],
+    ['Rationale', plan.rationale || '—'],
+  ];
+
+  entries.forEach(([label, value]) => {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    agentPlanDetailsEl.appendChild(dt);
+    agentPlanDetailsEl.appendChild(dd);
+  });
+
+  if (agentPlanSaveBtn) agentPlanSaveBtn.disabled = false;
+}
+
+function clearAgentPlan() {
+  state.agentPlan = null;
+  renderAgentPlan();
+}
+
+async function handleAgentBuild(event) {
+  event.preventDefault();
+  const prompt = agentBuilderPromptEl?.value.trim();
+  if (!prompt) return;
+  const context = agentBuilderContextEl?.value.trim();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (agentBuilderStatusEl) {
+    agentBuilderStatusEl.classList.remove('is-success', 'is-error');
+    agentBuilderStatusEl.classList.add('is-loading');
+    agentBuilderStatusEl.textContent = 'Generating agent plan…';
+  }
+  if (submitButton) submitButton.disabled = true;
+  try {
+    const payload = { prompt };
+    if (context) payload.context = context;
+    const response = await fetchJSON('/api/agents/build', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    state.agentPlan = response.plan;
+    renderAgentPlan();
+    if (agentBuilderStatusEl) {
+      agentBuilderStatusEl.classList.remove('is-loading', 'is-error');
+      agentBuilderStatusEl.classList.add('is-success');
+      agentBuilderStatusEl.textContent = 'Plan ready — review and save below.';
+    }
+  } catch (error) {
+    console.error(error);
+    if (agentBuilderStatusEl) {
+      agentBuilderStatusEl.classList.remove('is-loading', 'is-success');
+      agentBuilderStatusEl.classList.add('is-error');
+      agentBuilderStatusEl.textContent = 'Unable to generate plan. Check your API configuration.';
+    }
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function handleAgentPlanSave() {
+  if (!state.agentPlan) return;
+  if (agentPlanSaveBtn) agentPlanSaveBtn.disabled = true;
+  if (agentBuilderStatusEl) {
+    agentBuilderStatusEl.classList.remove('is-success', 'is-error');
+    agentBuilderStatusEl.classList.add('is-loading');
+    agentBuilderStatusEl.textContent = 'Saving agent…';
+  }
+  try {
+    const plan = state.agentPlan;
+    const payload = {
+      name: plan.name,
+      mission: plan.mission,
+      instructions: plan.instructions,
+      capabilities: plan.capabilities || [],
+      tools: plan.tools || [],
+      workflow: plan.workflow || null,
+    };
+    const agent = await fetchJSON('/api/agents', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    state.currentAgentId = agent.id;
+    clearAgentPlan();
+    if (agentBuilderStatusEl) {
+      agentBuilderStatusEl.classList.remove('is-loading');
+      agentBuilderStatusEl.classList.add('is-success');
+      agentBuilderStatusEl.textContent = 'Agent saved to your workspace.';
+    }
+    await loadAgents();
+  } catch (error) {
+    console.error(error);
+    if (agentBuilderStatusEl) {
+      agentBuilderStatusEl.classList.remove('is-loading', 'is-success');
+      agentBuilderStatusEl.classList.add('is-error');
+      agentBuilderStatusEl.textContent = 'Unable to save agent. Please try again.';
+    }
+  } finally {
+    if (agentPlanSaveBtn) agentPlanSaveBtn.disabled = false;
+  }
+}
+
+function handleAgentPlanDismiss() {
+  clearAgentPlan();
+  if (agentBuilderStatusEl) {
+    agentBuilderStatusEl.classList.remove('is-loading', 'is-error', 'is-success');
+    agentBuilderStatusEl.textContent = '';
+  }
+}
+
+function handleAgentBuilderClear() {
+  if (agentBuilderForm) {
+    agentBuilderForm.reset();
+  }
+  clearAgentPlan();
+  if (agentBuilderStatusEl) {
+    agentBuilderStatusEl.classList.remove('is-loading', 'is-success', 'is-error');
+    agentBuilderStatusEl.textContent = '';
+  }
+}
+
+function focusAgentBuilder() {
+  if (!agentBuilderPromptEl) return;
+  agentBuilderPromptEl.focus();
+  agentBuilderPromptEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function handleAgentUpdate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const agentId = Number(form.dataset.agentId);
+  if (!agentId) return;
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  const status = form.querySelector('[data-agent-status]');
+  if (status) {
+    status.classList.remove('is-success', 'is-error');
+    status.classList.add('is-loading');
+    status.textContent = 'Saving changes…';
+  }
+  if (submitButton) submitButton.disabled = true;
+
+  const getValue = (name) => {
+    const field = form.querySelector(`[name="${name}"]`);
+    return field ? field.value.trim() : '';
+  };
+
+  const splitValues = (name) =>
+    getValue(name)
+      .split(/\r?\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  try {
+    const payload = {
+      name: getValue('name'),
+      mission: getValue('mission'),
+      instructions: getValue('instructions'),
+      capabilities: splitValues('capabilities'),
+      tools: splitValues('tools'),
+      workflow: getValue('workflow') || null,
+    };
+    const updated = await fetchJSON(`/api/agents/${agentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    state.agents = state.agents.map((agent) =>
+      agent.id === updated.id ? updated : agent
+    );
+    state.currentAgentId = updated.id;
+    renderAgentsList();
+    renderAgentDetail();
+    renderAgentWidgets();
+    if (status) {
+      status.classList.remove('is-loading', 'is-error');
+      status.classList.add('is-success');
+      status.textContent = 'Updated';
+    }
+  } catch (error) {
+    console.error(error);
+    if (status) {
+      status.classList.remove('is-loading', 'is-success');
+      status.classList.add('is-error');
+      status.textContent = 'Update failed';
+    }
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function loadAgents() {
+  if (!agentsPanelEl) return;
+  try {
+    const agents = await fetchJSON('/api/agents');
+    state.agents = agents;
+    if (!agents.length) {
+      state.currentAgentId = null;
+    } else if (!state.currentAgentId || !agents.some((agent) => agent.id === state.currentAgentId)) {
+      state.currentAgentId = agents[0].id;
+    }
+    renderAgentsList();
+    renderAgentDetail();
+    renderAgentWidgets();
+  } catch (error) {
+    console.error(error);
+    if (agentsCountEl) {
+      agentsCountEl.textContent = 'Error';
+    }
+  }
 }
 
 function populateGalleryFilter() {
@@ -1227,7 +1801,7 @@ function handleZoomButton(event) {
 function handleCanvasWheel(event) {
   if (!canvasWrapperEl) return;
   event.preventDefault();
-  const direction = event.deltaY > 0 ? 0.9 : 1.1;
+  const direction = event.deltaY > 0 ? 0.97 : 1.03;
   setCanvasScale(state.canvasScale * direction);
 }
 
@@ -1265,6 +1839,9 @@ function handleAddWidget(type) {
       break;
     case 'video':
       createVideoWidget();
+      break;
+    case 'agent':
+      createAgentWidget();
       break;
     case 'world':
       createWorldWidget();
@@ -1371,6 +1948,9 @@ function toggleAgents(open) {
   const isOpen = open ?? !agentsPanelEl.classList.contains('is-open');
   agentsPanelEl.classList.toggle('is-open', Boolean(isOpen));
   agentsPanelEl.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  if (isOpen) {
+    loadAgents();
+  }
 }
 
 function initialiseWidgets() {
@@ -1473,6 +2053,28 @@ if (agentsCloseBtn) {
   agentsCloseBtn.addEventListener('click', () => toggleAgents(false));
 }
 
+if (agentBuilderForm) {
+  agentBuilderForm.addEventListener('submit', handleAgentBuild);
+}
+
+if (agentBuilderClearBtn) {
+  agentBuilderClearBtn.addEventListener('click', handleAgentBuilderClear);
+}
+
+if (agentPlanSaveBtn) {
+  agentPlanSaveBtn.addEventListener('click', handleAgentPlanSave);
+}
+
+if (agentPlanDismissBtn) {
+  agentPlanDismissBtn.addEventListener('click', handleAgentPlanDismiss);
+}
+
+if (agentNewFromPlanBtn) {
+  agentNewFromPlanBtn.addEventListener('click', () => {
+    focusAgentBuilder();
+  });
+}
+
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     if (studioEl && studioEl.classList.contains('is-open')) {
@@ -1492,6 +2094,8 @@ bindChatWorkspace();
 initialiseWidgets();
 setCanvasScale(state.canvasScale);
 syncDurationVisibility();
+renderAgentPlan();
 loadConversations();
 loadGallery();
 loadGalleries();
+loadAgents();
