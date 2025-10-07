@@ -8,12 +8,24 @@
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
+    <header class="topbar">
+      <div class="topbar__brand">
+        <span class="topbar__logo" aria-hidden="true">✨</span>
+        <span class="topbar__title">OpenAI Mega App</span>
+      </div>
+      <div class="topbar__actions">
+        <button id="studio-toggle" class="btn btn--ghost" type="button">
+          <span>Studio</span>
+        </button>
+      </div>
+    </header>
+
     <header class="hero">
       <div class="hero__content">
         <h1>OpenAI Mega App</h1>
         <p>
           A product-minded playground showcasing the latest OpenAI APIs, rich conversation
-          management, and a generative gallery backed by SQLite.
+          management, and a generative studio backed by SQLite.
         </p>
         <button id="new-conversation" class="btn btn--primary">New Conversation</button>
       </div>
@@ -42,27 +54,211 @@
         </form>
       </section>
 
-      <section class="panel">
-        <h2>Generative Gallery</h2>
-        <form id="image-form" class="image-form">
-          <input id="image-prompt" type="text" placeholder="Dream up an illustration..." />
-          <div class="image-form__controls">
-            <select id="image-size">
-              <option value="1024x1024">1024x1024</option>
-              <option value="512x512">512x512</option>
-              <option value="256x256">256x256</option>
+      <section class="panel panel--gallery">
+        <div class="panel__header">
+          <h2>Generative Feed</h2>
+          <div class="feed-controls">
+            <input
+              id="feed-search"
+              type="search"
+              placeholder="Search generated assets..."
+              aria-label="Search generated assets"
+            />
+            <select id="feed-type-filter" aria-label="Filter by asset type">
+              <option value="all">All assets</option>
+              <option value="image">Images</option>
+              <option value="video">Videos</option>
             </select>
-            <select id="image-quality">
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-            <button type="submit" class="btn">Generate</button>
           </div>
-        </form>
+        </div>
         <div id="gallery" class="gallery"></div>
       </section>
     </main>
+
+    <section id="studio" class="studio" aria-hidden="true">
+      <div class="studio__surface">
+        <header class="studio__header">
+          <div>
+            <p class="studio__eyebrow">Creator Tools</p>
+            <h2>Studio Workspace</h2>
+          </div>
+          <div class="studio__header-actions">
+            <button id="studio-close" class="btn" type="button">Close</button>
+          </div>
+        </header>
+        <div class="studio__body">
+          <aside class="studio__sidebar" aria-label="Studio navigation">
+            <button class="studio__nav-btn is-active" data-view="generate" type="button">
+              Generate
+            </button>
+            <button class="studio__nav-btn" data-view="gallery" type="button">Gallery</button>
+            <button class="studio__nav-btn" data-view="composer" type="button">Studio</button>
+          </aside>
+          <div class="studio__workspace">
+            <section
+              id="studio-view-generate"
+              class="studio-view is-active"
+              data-view="generate"
+            >
+              <header class="studio-view__header">
+                <h3>Create images &amp; motion</h3>
+                <p>Craft prompts, tweak aspect ratios, and publish straight to your feed.</p>
+              </header>
+              <form id="studio-generate-form" class="studio-form">
+                <label class="studio-field">
+                  <span>Prompt</span>
+                  <textarea
+                    id="studio-prompt"
+                    placeholder="Imagine a cinematic product launch storyboard..."
+                    required
+                  ></textarea>
+                </label>
+                <div class="studio-form__grid">
+                  <label class="studio-field">
+                    <span>Asset type</span>
+                    <select id="studio-asset-type">
+                      <option value="image">Image</option>
+                      <option value="video">Video</option>
+                    </select>
+                  </label>
+                  <label class="studio-field">
+                    <span>Size</span>
+                    <select id="studio-size">
+                      <option value="1024x1024">1024 × 1024</option>
+                      <option value="512x512">512 × 512</option>
+                      <option value="256x256">256 × 256</option>
+                    </select>
+                  </label>
+                  <label class="studio-field">
+                    <span>Aspect ratio</span>
+                    <select id="studio-aspect">
+                      <option value="1:1">1:1</option>
+                      <option value="16:9">16:9</option>
+                      <option value="9:16">9:16</option>
+                      <option value="4:5">4:5</option>
+                    </select>
+                  </label>
+                  <label class="studio-field">
+                    <span>Quality</span>
+                    <select id="studio-quality">
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </label>
+                  <label class="studio-field" id="studio-duration-field">
+                    <span>Duration (seconds)</span>
+                    <input id="studio-duration" type="number" value="8" min="2" max="60" />
+                  </label>
+                </div>
+                <div class="studio-form__actions">
+                  <button type="submit" class="btn btn--primary">Generate asset</button>
+                  <p class="studio-form__hint">All outputs are saved to the main feed automatically.</p>
+                </div>
+              </form>
+            </section>
+
+            <section id="studio-view-gallery" class="studio-view" data-view="gallery">
+              <header class="studio-view__header">
+                <h3>Manage galleries</h3>
+                <p>Create custom, on-brand collections and keep them searchable.</p>
+              </header>
+              <form id="studio-gallery-form" class="studio-form studio-form--inline">
+                <label class="studio-field">
+                  <span>Name</span>
+                  <input id="studio-gallery-name" type="text" placeholder="Summer campaign" required />
+                </label>
+                <label class="studio-field">
+                  <span>Category</span>
+                  <input id="studio-gallery-category" type="text" placeholder="Launch" />
+                </label>
+                <label class="studio-field">
+                  <span>Accent color</span>
+                  <input id="studio-gallery-color" type="color" value="#10a37f" />
+                </label>
+                <label class="studio-field">
+                  <span>Layout</span>
+                  <select id="studio-gallery-layout">
+                    <option value="grid">Grid</option>
+                    <option value="masonry">Masonry</option>
+                    <option value="filmstrip">Filmstrip</option>
+                  </select>
+                </label>
+                <label class="studio-field studio-field--wide">
+                  <span>Description</span>
+                  <input
+                    id="studio-gallery-description"
+                    type="text"
+                    placeholder="Hero imagery for Q3 growth campaign"
+                  />
+                </label>
+                <button type="submit" class="btn btn--primary">Create gallery</button>
+              </form>
+
+              <div class="studio-gallery__controls">
+                <input
+                  id="studio-gallery-search"
+                  type="search"
+                  placeholder="Search galleries"
+                />
+                <select id="studio-gallery-filter">
+                  <option value="all">All categories</option>
+                </select>
+              </div>
+              <div id="studio-gallery-list" class="studio-gallery__list"></div>
+            </section>
+
+            <section id="studio-view-composer" class="studio-view" data-view="composer">
+              <header class="studio-view__header">
+                <h3>Video studio</h3>
+                <p>Import gallery visuals, arrange scenes, and publish a final video.</p>
+              </header>
+              <form id="studio-composer-form" class="studio-form studio-form--inline">
+                <label class="studio-field">
+                  <span>Title</span>
+                  <input id="composer-title" type="text" placeholder="Vertical launch reel" />
+                </label>
+                <label class="studio-field">
+                  <span>Orientation</span>
+                  <select id="composer-orientation">
+                    <option value="vertical">Vertical</option>
+                    <option value="landscape">Landscape</option>
+                  </select>
+                </label>
+                <label class="studio-field studio-field--wide">
+                  <span>Description</span>
+                  <input id="composer-description" type="text" placeholder="Optional treatment notes" />
+                </label>
+              </form>
+              <div class="studio-composer">
+                <div class="studio-composer__library">
+                  <div class="studio-composer__library-header">
+                    <h4>Source library</h4>
+                    <select id="composer-gallery-select">
+                      <option value="feed">Main feed</option>
+                    </select>
+                  </div>
+                  <div id="composer-library" class="studio-composer__grid"></div>
+                </div>
+                <div class="studio-composer__timeline">
+                  <div class="studio-composer__timeline-header">
+                    <h4>Timeline</h4>
+                    <button id="composer-clear" type="button" class="btn">Clear</button>
+                  </div>
+                  <ol id="composer-timeline" class="studio-composer__timeline-list"></ol>
+                  <button id="composer-render" class="btn btn--primary" type="button">
+                    Render final video
+                  </button>
+                  <p class="studio-form__hint">
+                    The rendered video will appear in your main feed and can be added to any gallery.
+                  </p>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <footer class="footer">
       <p>

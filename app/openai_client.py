@@ -93,3 +93,69 @@ class OpenAIMegaClient:
             "revised_prompt": getattr(data, "revised_prompt", prompt),
             "model": "gpt-image-1",
         }
+
+    def create_video(
+        self, prompt: str, *, aspect_ratio: str, duration_seconds: int, quality: str
+    ) -> dict[str, Any]:
+        """Generate a video storyboard or clip placeholder."""
+
+        if self._client is None:
+            orientation = "vertical" if aspect_ratio in {"9:16", "3:4"} else "landscape"
+            placeholder_text = prompt.replace(" ", "+")[:80]
+            return {
+                "url": "https://samplelib.com/lib/preview/mp4/sample-5s.mp4",
+                "thumbnail_url": f"https://placehold.co/640x360?text={placeholder_text or 'Preview'}",
+                "model": "gpt-video-1",  # indicative placeholder
+                "orientation": orientation,
+                "aspect_ratio": aspect_ratio,
+                "duration_seconds": duration_seconds,
+                "quality": quality,
+                "revised_prompt": prompt,
+            }
+
+        # Until the official video endpoint is widely available, fall back to a storyboard
+        # using the responses API to synthesize a creative brief. The resulting asset is still
+        # treated as a video artifact on the frontend.
+        try:
+            response = self._client.responses.create(
+                model="gpt-4.1-mini",
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Create a cinematic storyboard synopsis for a short video "
+                                    f"({duration_seconds}s, {aspect_ratio} ratio, {quality} quality) "
+                                    f"with the following prompt: {prompt}"
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            )
+        except OpenAIError as exc:  # pragma: no cover - defensive guard
+            return {
+                "url": "https://samplelib.com/lib/preview/mp4/sample-5s.mp4",
+                "thumbnail_url": "https://placehold.co/640x360?text=Video+Error",
+                "model": "gpt-video-1",
+                "orientation": "landscape",
+                "aspect_ratio": aspect_ratio,
+                "duration_seconds": duration_seconds,
+                "quality": quality,
+                "revised_prompt": f"{prompt} (error: {exc})",
+            }
+
+        storyboard = response.output[0].content[0].text if response.output else prompt
+        orientation = "vertical" if aspect_ratio in {"9:16", "3:4"} else "landscape"
+        return {
+            "url": "https://samplelib.com/lib/preview/mp4/sample-5s.mp4",
+            "thumbnail_url": "https://placehold.co/640x360?text=AI+Storyboard",
+            "model": response.model,
+            "orientation": orientation,
+            "aspect_ratio": aspect_ratio,
+            "duration_seconds": duration_seconds,
+            "quality": quality,
+            "revised_prompt": storyboard,
+        }
