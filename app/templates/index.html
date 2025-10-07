@@ -14,6 +14,25 @@
         <span class="topbar__title">OpenAI Mega App</span>
       </div>
       <div class="topbar__actions">
+        <div class="dropdown" data-dropdown>
+          <button
+            id="add-widget"
+            class="btn btn--ghost"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded="false"
+          >
+            Add Widget
+            <span class="dropdown__caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="dropdown__menu" role="menu" aria-hidden="true">
+            <button class="dropdown__item" data-widget-type="chat" type="button">New chat workspace</button>
+            <button class="dropdown__item" data-widget-type="image" type="button">Image generator</button>
+            <button class="dropdown__item" data-widget-type="video" type="button">Video generator</button>
+            <button class="dropdown__item" data-widget-type="world" type="button">3D world creator</button>
+          </div>
+        </div>
+        <button id="agents-toggle" class="btn btn--ghost" type="button">Agents</button>
         <button id="studio-toggle" class="btn btn--ghost" type="button">
           <span>Studio</span>
         </button>
@@ -27,53 +46,124 @@
           A product-minded playground showcasing the latest OpenAI APIs, rich conversation
           management, and a generative studio backed by SQLite.
         </p>
-        <button id="new-conversation" class="btn btn--primary">New Conversation</button>
       </div>
       <div class="hero__badge">API-first · Product Ready · PM Portfolio</div>
     </header>
 
-    <main class="layout">
-      <section class="panel">
-        <h2>Conversations</h2>
-        <ul id="conversation-list" class="conversation-list"></ul>
-      </section>
-
-      <section class="panel">
-        <h2>Chat Workspace</h2>
-        <div id="chat-thread" class="chat-thread"></div>
-        <form id="chat-form" class="chat-form">
-          <textarea id="chat-input" placeholder="Ask anything about your next product milestone..."></textarea>
-          <div class="chat-form__controls">
-            <select id="model-select">
-              <option value="gpt-5-chat-latest" selected>gpt-5-chat-latest</option>
-              <option value="gpt-4.1">gpt-4.1</option>
-              <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-              <option value="o4-mini">o4-mini</option>
-            </select>
-            <button type="submit" class="btn btn--primary">Send</button>
-          </div>
-        </form>
-      </section>
-
-      <section class="panel panel--gallery">
-        <div class="panel__header">
-          <h2>Generative Feed</h2>
-          <div class="feed-controls">
-            <input
-              id="feed-search"
-              type="search"
-              placeholder="Search generated assets..."
-              aria-label="Search generated assets"
-            />
-            <select id="feed-type-filter" aria-label="Filter by asset type">
-              <option value="all">All assets</option>
-              <option value="image">Images</option>
-              <option value="video">Videos</option>
-            </select>
+    <main class="workspace">
+      <div class="canvas-controls">
+        <div class="canvas-controls__group">
+          <span class="canvas-controls__label">Canvas zoom</span>
+          <div class="canvas-controls__buttons">
+            <button class="canvas-controls__btn" data-zoom="out" type="button" aria-label="Zoom out">−</button>
+            <button class="canvas-controls__btn" data-zoom="reset" type="button">Reset</button>
+            <button class="canvas-controls__btn" data-zoom="in" type="button" aria-label="Zoom in">+</button>
           </div>
         </div>
-        <div id="gallery" class="gallery"></div>
-      </section>
+        <span id="zoom-indicator" class="canvas-controls__value">100%</span>
+      </div>
+      <div id="canvas-wrapper" class="canvas-wrapper">
+        <div id="canvas" class="canvas">
+          <div id="canvas-content" class="canvas__content">
+            <section
+              id="widget-conversations"
+              class="widget"
+              data-widget
+              data-lock-close="true"
+              style="width: 320px; height: 460px; left: 24px; top: 24px;"
+            >
+              <header class="widget__header" data-drag-handle>
+                <h2 class="widget__title">Conversations</h2>
+                <div class="widget__toolbar">
+                  <button id="new-conversation" class="btn btn--primary btn--sm" type="button">
+                    New conversation
+                  </button>
+                  <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">
+                    ▭
+                  </button>
+                </div>
+              </header>
+              <div class="widget__body">
+                <ul id="conversation-list" class="conversation-list"></ul>
+              </div>
+              <div class="widget__resize" data-resize aria-hidden="true"></div>
+            </section>
+
+            <section
+              id="widget-chat"
+              class="widget"
+              data-widget
+              style="width: 520px; height: 520px; left: 380px; top: 80px;"
+              data-widget-type="chat"
+            >
+              <header class="widget__header" data-drag-handle>
+                <h2 class="widget__title">Chat workspace</h2>
+                <div class="widget__toolbar">
+                  <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">
+                    ▭
+                  </button>
+                  <button class="widget__icon" data-action="close" type="button" aria-label="Close">
+                    ✕
+                  </button>
+                </div>
+              </header>
+              <div class="widget__body">
+                <div id="chat-thread" class="chat-thread"></div>
+                <form id="chat-form" class="chat-form">
+                  <textarea
+                    id="chat-input"
+                    placeholder="Ask anything about your next product milestone..."
+                  ></textarea>
+                  <div class="chat-form__controls">
+                    <select id="model-select">
+                      <option value="gpt-5-chat-latest" selected>gpt-5-chat-latest</option>
+                      <option value="gpt-4.1">gpt-4.1</option>
+                      <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                      <option value="o4-mini">o4-mini</option>
+                    </select>
+                    <button type="submit" class="btn btn--primary">Send</button>
+                  </div>
+                </form>
+              </div>
+              <div class="widget__resize" data-resize aria-hidden="true"></div>
+            </section>
+
+            <section
+              id="widget-feed"
+              class="widget"
+              data-widget
+              style="width: 480px; height: 480px; left: 960px; top: 60px;"
+              data-widget-type="feed"
+            >
+              <header class="widget__header" data-drag-handle>
+                <h2 class="widget__title">Generative feed</h2>
+                <div class="widget__toolbar">
+                  <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">
+                    ▭
+                  </button>
+                </div>
+              </header>
+              <div class="widget__body">
+                <div class="feed-controls">
+                  <input
+                    id="feed-search"
+                    type="search"
+                    placeholder="Search generated assets..."
+                    aria-label="Search generated assets"
+                  />
+                  <select id="feed-type-filter" aria-label="Filter by asset type">
+                    <option value="all">All assets</option>
+                    <option value="image">Images</option>
+                    <option value="video">Videos</option>
+                  </select>
+                </div>
+                <div id="gallery" class="gallery"></div>
+              </div>
+              <div class="widget__resize" data-resize aria-hidden="true"></div>
+            </section>
+          </div>
+        </div>
+      </div>
     </main>
 
     <section id="studio" class="studio" aria-hidden="true">
@@ -256,6 +346,21 @@
                 </div>
               </div>
             </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="agents" class="agents" aria-hidden="true">
+      <div class="agents__surface">
+        <header class="agents__header">
+          <h2>Agents workspace</h2>
+          <p>A blank canvas for your future agent tools.</p>
+          <button id="agents-close" class="btn" type="button">Close</button>
+        </header>
+        <div class="agents__body">
+          <div class="agents__placeholder">
+            <p>Design your agent orchestration tools here.</p>
           </div>
         </div>
       </div>

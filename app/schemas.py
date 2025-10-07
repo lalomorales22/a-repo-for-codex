@@ -12,6 +12,10 @@ class ConversationCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
 
 
+class ConversationUpdate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+
+
 class ConversationRead(BaseModel):
     id: int
     title: str
