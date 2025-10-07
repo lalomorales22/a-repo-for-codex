@@ -31,9 +31,19 @@
             <button class="dropdown__item" data-widget-type="video" type="button">Video generator</button>
             <button class="dropdown__item" data-widget-type="agent" type="button">Agents control room</button>
             <button class="dropdown__item" data-widget-type="world" type="button">3D world creator</button>
+            <button class="dropdown__item" data-widget-type="code" type="button">Code sandbox</button>
+            <button class="dropdown__item" data-widget-type="document" type="button">Document writer</button>
+            <button class="dropdown__item" data-widget-type="presentation" type="button">Presentation builder</button>
+            <button class="dropdown__item" data-widget-type="data" type="button">Data visualizer</button>
+            <button class="dropdown__item" data-widget-type="game" type="button">Game builder</button>
+            <button class="dropdown__item" data-widget-type="avatar" type="button">Avatar creator</button>
+            <button class="dropdown__item" data-widget-type="simulation" type="button">Simulation sandbox</button>
+            <button class="dropdown__item" data-widget-type="whiteboard" type="button">Collaboration whiteboard</button>
+            <button class="dropdown__item" data-widget-type="knowledge" type="button">Knowledge board</button>
           </div>
         </div>
         <button id="agents-toggle" class="btn btn--ghost" type="button">Agents</button>
+        <button id="audio-toggle" class="btn btn--ghost" type="button">Audio</button>
         <button id="studio-toggle" class="btn btn--ghost" type="button">
           <span>Studio</span>
         </button>
@@ -424,6 +434,69 @@
             </section>
             <section class="agents__detail" id="agent-detail" aria-live="polite"></section>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="audio" class="audio" aria-hidden="true">
+      <div class="audio__surface">
+        <header class="audio__header">
+          <div>
+            <p class="audio__eyebrow">Sound studio</p>
+            <h2>Audio workspace</h2>
+            <p>Compose music, narration, and sound effects powered by ElevenLabs.</p>
+          </div>
+          <button id="audio-close" class="btn" type="button">Close</button>
+        </header>
+        <div class="audio__body">
+          <section class="audio__generator" aria-labelledby="audio-form-title">
+            <h3 id="audio-form-title">Create a new track</h3>
+            <form id="audio-form" class="audio-form">
+              <label class="audio-field">
+                <span>Title</span>
+                <input id="audio-title" type="text" placeholder="Midnight product launch anthem" required />
+              </label>
+              <label class="audio-field">
+                <span>Creative brief</span>
+                <textarea id="audio-prompt" placeholder="Describe the vibe, instruments, and pacing" required></textarea>
+              </label>
+              <div class="audio-form__grid">
+                <label class="audio-field">
+                  <span>Style</span>
+                  <input id="audio-style" type="text" placeholder="Cinematic electronic" />
+                </label>
+                <label class="audio-field">
+                  <span>Voice / Instrument</span>
+                  <input id="audio-voice" type="text" placeholder="Voice ID or instrument" />
+                </label>
+                <label class="audio-field">
+                  <span>Track type</span>
+                  <select id="audio-type">
+                    <option value="music">Music</option>
+                    <option value="sound-effect">Sound effect</option>
+                    <option value="voiceover">Voiceover</option>
+                  </select>
+                </label>
+                <label class="audio-field">
+                  <span>Duration (seconds)</span>
+                  <input id="audio-duration" type="number" min="5" max="600" placeholder="30" />
+                </label>
+              </div>
+              <div class="audio-form__actions">
+                <button type="submit" class="btn btn--primary">Generate audio</button>
+                <p id="audio-status" class="audio-status" role="status" aria-live="polite"></p>
+              </div>
+            </form>
+          </section>
+          <section class="audio__library" aria-labelledby="audio-gallery-title">
+            <header class="audio__library-header">
+              <div>
+                <h3 id="audio-gallery-title">Audio gallery</h3>
+                <p id="audio-count" class="audio__count">0 tracks</p>
+              </div>
+            </header>
+            <div id="audio-gallery" class="audio-gallery"></div>
+          </section>
         </div>
       </div>
     </section>

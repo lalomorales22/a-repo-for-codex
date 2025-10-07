@@ -4,6 +4,7 @@ const state = {
   messages: {},
   assets: [],
   galleries: [],
+  widgets: [],
   filters: {
     feedSearch: '',
     feedType: 'all',
@@ -18,6 +19,7 @@ const state = {
   agents: [],
   currentAgentId: null,
   agentPlan: null,
+  audioTracks: [],
 };
 
 const conversationListEl = document.getElementById('conversation-list');
@@ -57,6 +59,19 @@ const agentPlanNameEl = document.getElementById('agent-plan-name');
 const agentPlanDetailsEl = document.getElementById('agent-plan-details');
 const agentPlanSaveBtn = document.getElementById('agent-plan-save');
 const agentPlanDismissBtn = document.getElementById('agent-plan-dismiss');
+const audioPanelEl = document.getElementById('audio');
+const audioToggleBtn = document.getElementById('audio-toggle');
+const audioCloseBtn = document.getElementById('audio-close');
+const audioFormEl = document.getElementById('audio-form');
+const audioTitleEl = document.getElementById('audio-title');
+const audioPromptEl = document.getElementById('audio-prompt');
+const audioStyleEl = document.getElementById('audio-style');
+const audioVoiceEl = document.getElementById('audio-voice');
+const audioTypeEl = document.getElementById('audio-type');
+const audioDurationEl = document.getElementById('audio-duration');
+const audioStatusEl = document.getElementById('audio-status');
+const audioGalleryEl = document.getElementById('audio-gallery');
+const audioCountEl = document.getElementById('audio-count');
 
 let widgetZIndex = 10;
 let pointerInteraction = null;
@@ -314,6 +329,63 @@ function mountWidget(widget) {
   return widget;
 }
 
+function registerWidget(record, widget) {
+  if (!record || !widget) return;
+  widget.dataset.widgetId = String(record.id);
+  widget.dataset.widgetType = record.widget_type;
+  widget.setAttribute('data-widget-title', record.title || record.widget_type);
+  upsertWidgetState(record);
+}
+
+function upsertWidgetState(record) {
+  const index = state.widgets.findIndex((item) => item.id === record.id);
+  if (index >= 0) {
+    state.widgets[index] = record;
+  } else {
+    state.widgets.push(record);
+  }
+}
+
+function buildWidgetShell(type, record, options) {
+  const widget = document.createElement('section');
+  widget.className = 'widget';
+  widget.dataset.widget = '';
+  widget.dataset.widgetType = type;
+  const width = record?.width ?? options.width;
+  const height = record?.height ?? options.height;
+  const position = record
+    ? { left: record.position_left, top: record.position_top }
+    : (() => {
+        const base = nextWidgetPosition();
+        const offset = options.offset || { left: 0, top: 0 };
+        return { left: base.left + offset.left, top: base.top + offset.top };
+      })();
+  widget.style.width = `${width}px`;
+  widget.style.height = `${height}px`;
+  widget.style.left = `${position.left}px`;
+  widget.style.top = `${position.top}px`;
+  if (record?.id) {
+    widget.dataset.widgetId = String(record.id);
+  }
+  const widgetTitle = record?.title ?? options.title;
+  widget.innerHTML = `
+    <header class="widget__header" data-drag-handle>
+      <h2 class="widget__title">${widgetTitle}</h2>
+      <div class="widget__toolbar">
+        <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
+        <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
+      </div>
+    </header>
+    <div class="widget__body">${options.body}</div>
+    <div class="widget__resize" data-resize aria-hidden="true"></div>
+  `;
+  mountWidget(widget);
+  if (record) {
+    registerWidget(record, widget);
+  }
+  return widget;
+}
+
 function createChatWidget() {
   let widget = document.getElementById('widget-chat');
   if (widget) {
@@ -365,19 +437,30 @@ function createChatWidget() {
   return widget;
 }
 
-function createImageWidget() {
+function createImageWidget(record) {
   const widget = document.createElement('section');
   widget.className = 'widget';
   widget.dataset.widget = '';
   widget.dataset.widgetType = 'image';
-  widget.style.width = '420px';
-  widget.style.height = '430px';
-  const { left, top } = nextWidgetPosition();
-  widget.style.left = `${left + 120}px`;
-  widget.style.top = `${top + 60}px`;
+  const width = record?.width ?? 420;
+  const height = record?.height ?? 430;
+  const position = record
+    ? { left: record.position_left, top: record.position_top }
+    : (() => {
+        const next = nextWidgetPosition();
+        return { left: next.left + 120, top: next.top + 60 };
+      })();
+  widget.style.width = `${width}px`;
+  widget.style.height = `${height}px`;
+  widget.style.left = `${position.left}px`;
+  widget.style.top = `${position.top}px`;
+  if (record?.id) {
+    widget.dataset.widgetId = String(record.id);
+  }
+  const widgetTitle = record?.title ?? 'Image generator';
   widget.innerHTML = `
     <header class="widget__header" data-drag-handle>
-      <h2 class="widget__title">Image generator</h2>
+      <h2 class="widget__title">${widgetTitle}</h2>
       <div class="widget__toolbar">
         <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
         <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
@@ -414,6 +497,9 @@ function createImageWidget() {
     <div class="widget__resize" data-resize aria-hidden="true"></div>
   `;
   mountWidget(widget);
+  if (record) {
+    registerWidget(record, widget);
+  }
   const form = widget.querySelector('[data-image-form]');
   const statusEl = widget.querySelector('[data-status]');
   if (form) {
@@ -452,19 +538,30 @@ function createImageWidget() {
   return widget;
 }
 
-function createVideoWidget() {
+function createVideoWidget(record) {
   const widget = document.createElement('section');
   widget.className = 'widget';
   widget.dataset.widget = '';
   widget.dataset.widgetType = 'video';
-  widget.style.width = '440px';
-  widget.style.height = '460px';
-  const { left, top } = nextWidgetPosition();
-  widget.style.left = `${left + 220}px`;
-  widget.style.top = `${top + 120}px`;
+  const width = record?.width ?? 440;
+  const height = record?.height ?? 460;
+  const position = record
+    ? { left: record.position_left, top: record.position_top }
+    : (() => {
+        const next = nextWidgetPosition();
+        return { left: next.left + 220, top: next.top + 120 };
+      })();
+  widget.style.width = `${width}px`;
+  widget.style.height = `${height}px`;
+  widget.style.left = `${position.left}px`;
+  widget.style.top = `${position.top}px`;
+  if (record?.id) {
+    widget.dataset.widgetId = String(record.id);
+  }
+  const widgetTitle = record?.title ?? 'Video generator';
   widget.innerHTML = `
     <header class="widget__header" data-drag-handle>
-      <h2 class="widget__title">Video generator</h2>
+      <h2 class="widget__title">${widgetTitle}</h2>
       <div class="widget__toolbar">
         <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
         <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
@@ -497,6 +594,9 @@ function createVideoWidget() {
     <div class="widget__resize" data-resize aria-hidden="true"></div>
   `;
   mountWidget(widget);
+  if (record) {
+    registerWidget(record, widget);
+  }
   const form = widget.querySelector('[data-video-form]');
   const statusEl = widget.querySelector('[data-status]');
   if (form) {
@@ -535,19 +635,30 @@ function createVideoWidget() {
   return widget;
 }
 
-function createWorldWidget() {
+function createWorldWidget(record) {
   const widget = document.createElement('section');
   widget.className = 'widget';
   widget.dataset.widget = '';
   widget.dataset.widgetType = 'world';
-  widget.style.width = '420px';
-  widget.style.height = '400px';
-  const { left, top } = nextWidgetPosition();
-  widget.style.left = `${left + 260}px`;
-  widget.style.top = `${top + 160}px`;
+  const width = record?.width ?? 420;
+  const height = record?.height ?? 400;
+  const position = record
+    ? { left: record.position_left, top: record.position_top }
+    : (() => {
+        const next = nextWidgetPosition();
+        return { left: next.left + 260, top: next.top + 160 };
+      })();
+  widget.style.width = `${width}px`;
+  widget.style.height = `${height}px`;
+  widget.style.left = `${position.left}px`;
+  widget.style.top = `${position.top}px`;
+  if (record?.id) {
+    widget.dataset.widgetId = String(record.id);
+  }
+  const widgetTitle = record?.title ?? '3D world creator';
   widget.innerHTML = `
     <header class="widget__header" data-drag-handle>
-      <h2 class="widget__title">3D world creator</h2>
+      <h2 class="widget__title">${widgetTitle}</h2>
       <div class="widget__toolbar">
         <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
         <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
@@ -562,6 +673,9 @@ function createWorldWidget() {
     <div class="widget__resize" data-resize aria-hidden="true"></div>
   `;
   mountWidget(widget);
+  if (record) {
+    registerWidget(record, widget);
+  }
   const saveButton = widget.querySelector('[data-save-world]');
   const statusEl = widget.querySelector('[data-status]');
   if (saveButton) {
@@ -574,19 +688,30 @@ function createWorldWidget() {
   return widget;
 }
 
-function createAgentWidget() {
+function createAgentWidget(record) {
   const widget = document.createElement('section');
   widget.className = 'widget';
   widget.dataset.widget = '';
   widget.dataset.widgetType = 'agent';
-  widget.style.width = '420px';
-  widget.style.height = '380px';
-  const { left, top } = nextWidgetPosition();
-  widget.style.left = `${left + 120}px`;
-  widget.style.top = `${top + 200}px`;
+  const width = record?.width ?? 420;
+  const height = record?.height ?? 380;
+  const position = record
+    ? { left: record.position_left, top: record.position_top }
+    : (() => {
+        const next = nextWidgetPosition();
+        return { left: next.left + 120, top: next.top + 200 };
+      })();
+  widget.style.width = `${width}px`;
+  widget.style.height = `${height}px`;
+  widget.style.left = `${position.left}px`;
+  widget.style.top = `${position.top}px`;
+  if (record?.id) {
+    widget.dataset.widgetId = String(record.id);
+  }
+  const widgetTitle = record?.title ?? 'Agents roster';
   widget.innerHTML = `
     <header class="widget__header" data-drag-handle>
-      <h2 class="widget__title">Agents roster</h2>
+      <h2 class="widget__title">${widgetTitle}</h2>
       <div class="widget__toolbar">
         <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
         <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
@@ -601,12 +726,536 @@ function createAgentWidget() {
     <div class="widget__resize" data-resize aria-hidden="true"></div>
   `;
   mountWidget(widget);
+  if (record) {
+    registerWidget(record, widget);
+  }
   const openButton = widget.querySelector('[data-open-agents]');
   if (openButton) {
     openButton.addEventListener('click', () => toggleAgents(true));
   }
   renderAgentWidgets();
   return widget;
+}
+
+function createCodeWidget(record) {
+  const widget = buildWidgetShell('code', record, {
+    title: 'Code sandbox',
+    width: 540,
+    height: 520,
+    offset: { left: 300, top: 200 },
+    body: `
+      <form class="widget-form code-widget" data-code-form>
+        <label class="widget-field">
+          <span>Language</span>
+          <select name="language">
+            <option value="JavaScript">JavaScript</option>
+            <option value="Python">Python</option>
+            <option value="Node">Node</option>
+          </select>
+        </label>
+        <label class="widget-field">
+          <span>Snippet</span>
+          <textarea name="snippet" class="code-widget__editor" placeholder="Write or paste code to simulate…" required></textarea>
+        </label>
+        <div class="widget-form__actions">
+          <button type="submit" class="btn btn--primary">Run sandbox</button>
+        </div>
+      </form>
+      <pre class="code-widget__output" data-code-output>// Awaiting snippet to simulate execution.</pre>
+    `,
+  });
+  const form = widget.querySelector('[data-code-form]');
+  const output = widget.querySelector('[data-code-output]');
+  if (form && output) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const language = form.querySelector('[name="language"]').value;
+      const snippet = form.querySelector('[name="snippet"]').value.trim();
+      if (!snippet) return;
+      output.textContent = `// Simulated ${language} run\n${snippet}\n\n// Results will appear once runtime APIs are wired up.`;
+    });
+  }
+  return widget;
+}
+
+function createDocumentWidget(record) {
+  const widget = buildWidgetShell('document', record, {
+    title: 'Document writer',
+    width: 480,
+    height: 500,
+    offset: { left: 360, top: 140 },
+    body: `
+      <form class="widget-form" data-document-form>
+        <label class="widget-field">
+          <span>Working title</span>
+          <input type="text" name="title" placeholder="Growth strategy brief" required />
+        </label>
+        <label class="widget-field">
+          <span>Key points</span>
+          <textarea name="outline" placeholder="Bullet out the narrative and supporting points" required></textarea>
+        </label>
+        <div class="widget-form__actions">
+          <button type="submit" class="btn btn--primary">Draft outline</button>
+        </div>
+      </form>
+      <article class="document-widget__preview" data-document-output aria-live="polite"></article>
+    `,
+  });
+  const form = widget.querySelector('[data-document-form]');
+  const output = widget.querySelector('[data-document-output]');
+  if (form && output) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const title = form.querySelector('[name="title"]').value.trim();
+      const outline = form.querySelector('[name="outline"]').value
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (!title || !outline.length) return;
+      output.innerHTML = `
+        <h3>${title}</h3>
+        <p>${outline[0]}</p>
+        <ul>${outline.slice(1).map((item) => `<li>${item}</li>`).join('')}</ul>
+        <p class="document-widget__hint">Full draft will render here once the document API is linked.</p>
+      `;
+    });
+  }
+  return widget;
+}
+
+function createPresentationWidget(record) {
+  const widget = buildWidgetShell('presentation', record, {
+    title: 'Presentation builder',
+    width: 500,
+    height: 520,
+    offset: { left: 420, top: 220 },
+    body: `
+      <form class="widget-form" data-presentation-form>
+        <label class="widget-field">
+          <span>Audience</span>
+          <input type="text" name="audience" placeholder="Product leadership" required />
+        </label>
+        <label class="widget-field">
+          <span>Slide notes</span>
+          <textarea name="slides" placeholder="One slide idea per line" required></textarea>
+        </label>
+        <div class="widget-form__actions">
+          <button type="submit" class="btn btn--primary">Generate deck plan</button>
+        </div>
+      </form>
+      <div class="presentation-widget__preview" data-presentation-output aria-live="polite"></div>
+    `,
+  });
+  const form = widget.querySelector('[data-presentation-form]');
+  const output = widget.querySelector('[data-presentation-output]');
+  if (form && output) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const audience = form.querySelector('[name="audience"]').value.trim();
+      const slides = form
+        .querySelector('[name="slides"]').value.split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean);
+      if (!audience || !slides.length) return;
+      output.innerHTML = `
+        <h3>Deck preview for ${audience}</h3>
+        <ol>${slides.map((slide, index) => `<li><span>Slide ${index + 1}:</span> ${slide}</li>`).join('')}</ol>
+        <p class="presentation-widget__hint">Slides render on canvas after integrating the presentation service.</p>
+      `;
+    });
+  }
+  return widget;
+}
+
+function createDataWidget(record) {
+  const widget = buildWidgetShell('data', record, {
+    title: 'Data visualizer',
+    width: 500,
+    height: 480,
+    offset: { left: 340, top: 260 },
+    body: `
+      <form class="widget-form" data-data-form>
+        <label class="widget-field">
+          <span>Dataset description</span>
+          <textarea name="dataset" placeholder="Paste rows or describe the KPIs to plot" required></textarea>
+        </label>
+        <label class="widget-field">
+          <span>Chart style</span>
+          <select name="chart">
+            <option value="line">Line</option>
+            <option value="bar">Bar</option>
+            <option value="pie">Pie</option>
+            <option value="scatter">Scatter</option>
+          </select>
+        </label>
+        <div class="widget-form__actions">
+          <button type="submit" class="btn btn--primary">Preview insight</button>
+        </div>
+      </form>
+      <div class="data-widget__preview" data-data-output>
+        <p class="widget__hint">Visualisations will appear here once the data service is connected.</p>
+      </div>
+    `,
+  });
+  const form = widget.querySelector('[data-data-form]');
+  const output = widget.querySelector('[data-data-output]');
+  if (form && output) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const description = form.querySelector('[name="dataset"]').value.trim();
+      if (!description) return;
+      const chart = form.querySelector('[name="chart"]').value;
+      output.innerHTML = `
+        <div class="data-widget__chart">
+          <p>${chart.toUpperCase()} chart preview</p>
+          <p class="data-widget__summary">${description.slice(0, 140)}…</p>
+        </div>
+      `;
+    });
+  }
+  return widget;
+}
+
+function createGameWidget(record) {
+  const widget = buildWidgetShell('game', record, {
+    title: 'Game builder',
+    width: 520,
+    height: 520,
+    offset: { left: 260, top: 300 },
+    body: `
+      <form class="widget-form" data-game-form>
+        <label class="widget-field">
+          <span>Core fantasy</span>
+          <input type="text" name="fantasy" placeholder="E.g. Design your own solar empire" required />
+        </label>
+        <label class="widget-field">
+          <span>Game loop</span>
+          <textarea name="loop" placeholder="Describe the repeatable actions" required></textarea>
+        </label>
+        <div class="widget-form__actions">
+          <button type="submit" class="btn btn--primary">Prototype concept</button>
+        </div>
+      </form>
+      <div class="game-widget__preview" data-game-output aria-live="polite"></div>
+    `,
+  });
+  const form = widget.querySelector('[data-game-form]');
+  const output = widget.querySelector('[data-game-output]');
+  if (form && output) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const fantasy = form.querySelector('[name="fantasy"]').value.trim();
+      const loop = form.querySelector('[name="loop"]').value.trim();
+      if (!fantasy || !loop) return;
+      output.innerHTML = `
+        <h3>${fantasy}</h3>
+        <p>${loop}</p>
+        <p class="game-widget__hint">Scene blocks and mechanics will materialise here after connecting the game runtime.</p>
+      `;
+    });
+  }
+  return widget;
+}
+
+function createAvatarWidget(record) {
+  const widget = buildWidgetShell('avatar', record, {
+    title: 'Avatar creator',
+    width: 460,
+    height: 480,
+    offset: { left: 220, top: 340 },
+    body: `
+      <form class="widget-form" data-avatar-form>
+        <label class="widget-field">
+          <span>Visual style</span>
+          <select name="style">
+            <option value="cartoon">Cartoon</option>
+            <option value="voxel">Voxel</option>
+            <option value="photorealistic">Photorealistic</option>
+          </select>
+        </label>
+        <label class="widget-field">
+          <span>Persona notes</span>
+          <textarea name="notes" placeholder="Describe personality, outfit, and pose" required></textarea>
+        </label>
+        <div class="widget-form__actions">
+          <button type="submit" class="btn btn--primary">Design avatar</button>
+        </div>
+      </form>
+      <div class="avatar-widget__preview" data-avatar-output aria-live="polite"></div>
+    `,
+  });
+  const form = widget.querySelector('[data-avatar-form]');
+  const output = widget.querySelector('[data-avatar-output]');
+  if (form && output) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const style = form.querySelector('[name="style"]').value;
+      const notes = form.querySelector('[name="notes"]').value.trim();
+      if (!notes) return;
+      output.innerHTML = `
+        <div class="avatar-widget__card">
+          <span class="avatar-widget__style">${style}</span>
+          <p>${notes}</p>
+        </div>
+        <p class="avatar-widget__hint">Preview image will display once the avatar pipeline is wired up.</p>
+      `;
+    });
+  }
+  return widget;
+}
+
+function createSimulationWidget(record) {
+  const widget = buildWidgetShell('simulation', record, {
+    title: 'Simulation sandbox',
+    width: 520,
+    height: 460,
+    offset: { left: 420, top: 320 },
+    body: `
+      <form class="widget-form" data-simulation-form>
+        <label class="widget-field">
+          <span>Scenario</span>
+          <input type="text" name="scenario" placeholder="Launch day traffic surge" required />
+        </label>
+        <label class="widget-field">
+          <span>Variables</span>
+          <textarea name="variables" placeholder="List inputs to simulate" required></textarea>
+        </label>
+        <div class="widget-form__actions">
+          <button type="submit" class="btn btn--primary">Run simulation</button>
+        </div>
+      </form>
+      <div class="simulation-widget__output" data-simulation-output>
+        <p class="widget__hint">Model outputs will stream here as soon as the physics service is ready.</p>
+      </div>
+    `,
+  });
+  const form = widget.querySelector('[data-simulation-form]');
+  const output = widget.querySelector('[data-simulation-output]');
+  if (form && output) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const scenario = form.querySelector('[name="scenario"]').value.trim();
+      const variables = form.querySelector('[name="variables"]').value
+        .split('\n')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (!scenario || !variables.length) return;
+      output.innerHTML = `
+        <h3>${scenario}</h3>
+        <p>Variables in play:</p>
+        <ul>${variables.map((item) => `<li>${item}</li>`).join('')}</ul>
+      `;
+    });
+  }
+  return widget;
+}
+
+function createWhiteboardWidget(record) {
+  const widget = buildWidgetShell('whiteboard', record, {
+    title: 'Collaboration whiteboard',
+    width: 540,
+    height: 500,
+    offset: { left: 380, top: 360 },
+    body: `
+      <form class="widget-form" data-whiteboard-form>
+        <label class="widget-field">
+          <span>Add sticky note</span>
+          <input type="text" name="note" placeholder="Capture a decision or task" />
+        </label>
+        <div class="widget-form__actions">
+          <button type="submit" class="btn">Add note</button>
+        </div>
+      </form>
+      <ul class="whiteboard-widget__notes" data-whiteboard-list></ul>
+      <p class="widget__hint">Shared cursors and live sync land here next.</p>
+    `,
+  });
+  const form = widget.querySelector('[data-whiteboard-form]');
+  const list = widget.querySelector('[data-whiteboard-list]');
+  if (form && list) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const input = form.querySelector('[name="note"]');
+      const value = input.value.trim();
+      if (!value) return;
+      const item = document.createElement('li');
+      item.textContent = value;
+      list.appendChild(item);
+      input.value = '';
+    });
+  }
+  return widget;
+}
+
+function createKnowledgeWidget(record) {
+  const widget = buildWidgetShell('knowledge', record, {
+    title: 'Knowledge board',
+    width: 500,
+    height: 500,
+    offset: { left: 440, top: 380 },
+    body: `
+      <form class="widget-form" data-knowledge-form>
+        <label class="widget-field">
+          <span>Title</span>
+          <input type="text" name="title" placeholder="Insight headline" required />
+        </label>
+        <label class="widget-field">
+          <span>Link or context</span>
+          <input type="url" name="url" placeholder="https://" />
+        </label>
+        <div class="widget-form__actions">
+          <button type="submit" class="btn">Pin insight</button>
+        </div>
+      </form>
+      <ol class="knowledge-widget__list" data-knowledge-list></ol>
+    `,
+  });
+  const form = widget.querySelector('[data-knowledge-form]');
+  const list = widget.querySelector('[data-knowledge-list]');
+  if (form && list) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const title = form.querySelector('[name="title"]').value.trim();
+      const url = form.querySelector('[name="url"]').value.trim();
+      if (!title) return;
+      const item = document.createElement('li');
+      if (url) {
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = title;
+        item.appendChild(link);
+      } else {
+        item.textContent = title;
+      }
+      list.appendChild(item);
+      form.reset();
+    });
+  }
+  return widget;
+}
+
+const widgetBlueprints = {
+  image: { title: 'Image generator', width: 420, height: 430, offset: { left: 120, top: 60 } },
+  video: { title: 'Video generator', width: 440, height: 460, offset: { left: 220, top: 120 } },
+  world: { title: '3D world creator', width: 420, height: 400, offset: { left: 260, top: 160 } },
+  agent: { title: 'Agents roster', width: 420, height: 380, offset: { left: 120, top: 200 } },
+  code: { title: 'Code sandbox', width: 540, height: 520, offset: { left: 300, top: 200 } },
+  document: { title: 'Document writer', width: 480, height: 500, offset: { left: 360, top: 140 } },
+  presentation: { title: 'Presentation builder', width: 500, height: 520, offset: { left: 420, top: 220 } },
+  data: { title: 'Data visualizer', width: 500, height: 480, offset: { left: 340, top: 260 } },
+  game: { title: 'Game builder', width: 520, height: 520, offset: { left: 260, top: 300 } },
+  avatar: { title: 'Avatar creator', width: 460, height: 480, offset: { left: 220, top: 340 } },
+  simulation: { title: 'Simulation sandbox', width: 520, height: 460, offset: { left: 420, top: 320 } },
+  whiteboard: { title: 'Collaboration whiteboard', width: 540, height: 500, offset: { left: 380, top: 360 } },
+  knowledge: { title: 'Knowledge board', width: 500, height: 500, offset: { left: 440, top: 380 } },
+};
+
+const widgetFactories = {
+  image: createImageWidget,
+  video: createVideoWidget,
+  world: createWorldWidget,
+  agent: createAgentWidget,
+  code: createCodeWidget,
+  document: createDocumentWidget,
+  presentation: createPresentationWidget,
+  data: createDataWidget,
+  game: createGameWidget,
+  avatar: createAvatarWidget,
+  simulation: createSimulationWidget,
+  whiteboard: createWhiteboardWidget,
+  knowledge: createKnowledgeWidget,
+};
+
+const persistableWidgetTypes = new Set(Object.keys(widgetFactories));
+
+function renderWidget(record) {
+  if (!record) return null;
+  const factory = widgetFactories[record.widget_type];
+  if (!factory) return null;
+  const existing = canvasContentEl?.querySelector(
+    `.widget[data-widget-id="${record.id}"]`
+  );
+  if (existing) {
+    return existing;
+  }
+  return factory(record);
+}
+
+async function loadWidgets() {
+  try {
+    const widgets = await fetchJSON('/api/widgets');
+    state.widgets = widgets;
+    widgets.forEach((record) => {
+      renderWidget(record);
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function createPersistedWidget(type) {
+  const blueprint = widgetBlueprints[type];
+  if (!blueprint) return;
+  const base = nextWidgetPosition();
+  const offset = blueprint.offset || { left: 0, top: 0 };
+  const payload = {
+    widget_type: type,
+    title: blueprint.title,
+    width: blueprint.width,
+    height: blueprint.height,
+    position_left: base.left + offset.left,
+    position_top: base.top + offset.top,
+  };
+  try {
+    const record = await fetchJSON('/api/widgets', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    renderWidget(record);
+  } catch (error) {
+    console.error(error);
+    alert('Unable to create widget. Check the server logs.');
+  }
+}
+
+async function persistWidgetState(widget) {
+  if (!widget) return;
+  const widgetId = widget.dataset.widgetId;
+  if (!widgetId) return;
+  const payload = {
+    width: parseFloat(widget.style.width) || widget.offsetWidth,
+    height: parseFloat(widget.style.height) || widget.offsetHeight,
+    position_left: parseFloat(widget.style.left) || widget.offsetLeft,
+    position_top: parseFloat(widget.style.top) || widget.offsetTop,
+  };
+  try {
+    const record = await fetchJSON(`/api/widgets/${widgetId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    upsertWidgetState(record);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function deleteWidgetRecord(widgetId) {
+  if (!widgetId) return;
+  try {
+    await fetchJSON(`/api/widgets/${widgetId}`, { method: 'DELETE' });
+    removeWidgetFromState(Number(widgetId));
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function removeWidgetFromState(widgetId) {
+  const index = state.widgets.findIndex((item) => item.id === Number(widgetId));
+  if (index >= 0) {
+    state.widgets.splice(index, 1);
+  }
 }
 
 async function sendMessage(event) {
@@ -1830,25 +2479,12 @@ function handleDocumentClick(event) {
 }
 
 function handleAddWidget(type) {
-  switch (type) {
-    case 'chat':
-      createChatWidget();
-      break;
-    case 'image':
-      createImageWidget();
-      break;
-    case 'video':
-      createVideoWidget();
-      break;
-    case 'agent':
-      createAgentWidget();
-      break;
-    case 'world':
-      createWorldWidget();
-      break;
-    default:
-      break;
+  if (type === 'chat') {
+    createChatWidget();
+    return;
   }
+  if (!persistableWidgetTypes.has(type)) return;
+  createPersistedWidget(type);
 }
 
 function handleAddWidgetOption(event) {
@@ -1871,7 +2507,11 @@ function handleWidgetAction(event) {
     if (widget.id === 'widget-chat') {
       unbindChatWorkspace();
     }
+    const widgetId = widget.dataset.widgetId;
     widget.remove();
+    if (widgetId) {
+      deleteWidgetRecord(widgetId);
+    }
   }
 }
 
@@ -1939,6 +2579,9 @@ function handlePointerUp(event) {
     } catch (error) {
       // Pointer might already be released if the widget was removed.
     }
+    if (pointerInteraction.type === 'drag' || pointerInteraction.type === 'resize') {
+      persistWidgetState(pointerInteraction.widget);
+    }
   }
   pointerInteraction = null;
 }
@@ -1950,6 +2593,129 @@ function toggleAgents(open) {
   agentsPanelEl.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
   if (isOpen) {
     loadAgents();
+  }
+}
+
+function toggleAudio(open) {
+  if (!audioPanelEl) return;
+  const isOpen = open ?? !audioPanelEl.classList.contains('is-open');
+  audioPanelEl.classList.toggle('is-open', Boolean(isOpen));
+  audioPanelEl.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  if (isOpen) {
+    loadAudioTracks();
+  }
+}
+
+function formatDuration(seconds) {
+  if (!seconds) return '';
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (mins) {
+    return `${mins}m ${secs.toString().padStart(2, '0')}s`;
+  }
+  return `${secs}s`;
+}
+
+function renderAudioGallery() {
+  if (!audioGalleryEl) return;
+  audioGalleryEl.innerHTML = '';
+  if (!state.audioTracks.length) {
+    const empty = document.createElement('p');
+    empty.className = 'audio-gallery__empty';
+    empty.textContent = 'No audio yet. Compose something with the generator to fill this space.';
+    audioGalleryEl.appendChild(empty);
+  } else {
+    state.audioTracks.forEach((track) => {
+      const card = document.createElement('article');
+      card.className = 'audio-card';
+      const player = document.createElement('audio');
+      player.controls = true;
+      player.src = track.url;
+      player.preload = 'none';
+      card.appendChild(player);
+
+      const content = document.createElement('div');
+      content.className = 'audio-card__content';
+
+      const title = document.createElement('h3');
+      title.textContent = track.title;
+      content.appendChild(title);
+
+      const meta = document.createElement('p');
+      meta.className = 'audio-card__meta';
+      const parts = [track.track_type];
+      if (track.style) parts.push(track.style);
+      if (track.voice) parts.push(`voice: ${track.voice}`);
+      if (track.duration_seconds) parts.push(formatDuration(track.duration_seconds));
+      meta.textContent = parts.filter(Boolean).join(' • ');
+      content.appendChild(meta);
+
+      if (track.description) {
+        const description = document.createElement('p');
+        description.className = 'audio-card__description';
+        description.textContent = track.description;
+        content.appendChild(description);
+      }
+
+      card.appendChild(content);
+      audioGalleryEl.appendChild(card);
+    });
+  }
+  if (audioCountEl) {
+    const count = state.audioTracks.length;
+    audioCountEl.textContent = `${count} ${count === 1 ? 'track' : 'tracks'}`;
+  }
+}
+
+async function loadAudioTracks() {
+  try {
+    const tracks = await fetchJSON('/api/audio-tracks');
+    state.audioTracks = tracks;
+    renderAudioGallery();
+  } catch (error) {
+    console.error(error);
+    if (audioStatusEl) {
+      audioStatusEl.textContent = 'Unable to load audio library.';
+    }
+  }
+}
+
+async function handleAudioGenerate(event) {
+  event.preventDefault();
+  if (!audioFormEl) return;
+  const title = audioTitleEl?.value.trim();
+  const prompt = audioPromptEl?.value.trim();
+  if (!title || !prompt) return;
+  const payload = {
+    title,
+    prompt,
+    style: audioStyleEl?.value ? audioStyleEl.value.trim() : null,
+    voice: audioVoiceEl?.value ? audioVoiceEl.value.trim() : null,
+    track_type: audioTypeEl?.value || 'music',
+    duration_seconds: audioDurationEl?.value ? Number(audioDurationEl.value) : null,
+  };
+  if (audioStatusEl) {
+    audioStatusEl.textContent = 'Generating audio…';
+    audioStatusEl.classList.remove('is-error', 'is-success');
+  }
+  try {
+    const track = await fetchJSON('/api/audio-tracks', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    state.audioTracks = [track, ...(state.audioTracks || [])];
+    renderAudioGallery();
+    audioFormEl.reset();
+    if (audioStatusEl) {
+      audioStatusEl.textContent = 'Track created! Ready for playback.';
+      audioStatusEl.classList.add('is-success');
+    }
+  } catch (error) {
+    console.error(error);
+    if (audioStatusEl) {
+      audioStatusEl.textContent = 'Audio generation failed. Check your ElevenLabs settings.';
+      audioStatusEl.classList.add('is-error');
+    }
   }
 }
 
@@ -2053,6 +2819,18 @@ if (agentsCloseBtn) {
   agentsCloseBtn.addEventListener('click', () => toggleAgents(false));
 }
 
+if (audioToggleBtn) {
+  audioToggleBtn.addEventListener('click', () => toggleAudio(true));
+}
+
+if (audioCloseBtn) {
+  audioCloseBtn.addEventListener('click', () => toggleAudio(false));
+}
+
+if (audioFormEl) {
+  audioFormEl.addEventListener('submit', handleAudioGenerate);
+}
+
 if (agentBuilderForm) {
   agentBuilderForm.addEventListener('submit', handleAgentBuild);
 }
@@ -2085,6 +2863,10 @@ document.addEventListener('keydown', (event) => {
       toggleAgents(false);
       return;
     }
+    if (audioPanelEl && audioPanelEl.classList.contains('is-open')) {
+      toggleAudio(false);
+      return;
+    }
     setDropdownOpen(false);
   }
 });
@@ -2096,6 +2878,7 @@ setCanvasScale(state.canvasScale);
 syncDurationVisibility();
 renderAgentPlan();
 loadConversations();
+loadWidgets();
 loadGallery();
 loadGalleries();
 loadAgents();

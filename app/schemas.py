@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
-import json
-from datetime import datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -196,3 +194,70 @@ class AgentBuildRequest(BaseModel):
 class AgentBuildResponse(BaseModel):
     plan: AgentPlan
     message: str = Field(default="Generated using OpenAI planning tools")
+
+
+class WorkspaceWidgetBase(BaseModel):
+    widget_type: str = Field(..., min_length=1, max_length=64)
+    title: str = Field(..., min_length=1, max_length=255)
+    width: float = Field(default=360.0, ge=160.0)
+    height: float = Field(default=320.0, ge=160.0)
+    position_left: float = Field(default=160.0)
+    position_top: float = Field(default=160.0)
+    config: Optional[dict[str, Any]] = None
+
+
+class WorkspaceWidgetCreate(WorkspaceWidgetBase):
+    pass
+
+
+class WorkspaceWidgetUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    width: Optional[float] = Field(default=None, ge=160.0)
+    height: Optional[float] = Field(default=None, ge=160.0)
+    position_left: Optional[float] = None
+    position_top: Optional[float] = None
+    config: Optional[dict[str, Any]] = None
+
+
+class WorkspaceWidgetRead(WorkspaceWidgetBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AudioGenerationRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    prompt: str = Field(..., min_length=1)
+    style: Optional[str] = Field(default=None, max_length=120)
+    voice: Optional[str] = Field(default=None, max_length=120)
+    track_type: str = Field(default="music")
+    duration_seconds: Optional[int] = Field(default=None, ge=5, le=600)
+
+
+class AudioTrackRead(BaseModel):
+    id: int
+    title: str
+    description: Optional[str]
+    style: Optional[str]
+    duration_seconds: Optional[int]
+    voice: Optional[str]
+    track_type: str
+    url: str
+    created_at: datetime
+    metadata_json: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
+
+    @model_validator(mode="after")
+    def _populate_metadata(self) -> "AudioTrackRead":
+        if self.metadata is None and self.metadata_json:
+            try:
+                self.metadata = json.loads(self.metadata_json)
+            except ValueError:
+                self.metadata = None
+        return self

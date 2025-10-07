@@ -9,6 +9,7 @@ import json
 
 from sqlalchemy import (
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -173,6 +174,53 @@ class GalleryAssetLink(Base):
     asset_id: Mapped[int] = mapped_column(ForeignKey("gallery_assets.id", ondelete="CASCADE"))
 
     __table_args__ = (UniqueConstraint("gallery_id", "asset_id", name="uq_gallery_asset"),)
+
+
+class WorkspaceWidget(Base):
+    """Widget instance shown on the primary canvas."""
+
+    __tablename__ = "workspace_widgets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    widget_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    width: Mapped[float] = mapped_column(Float, nullable=False, default=360.0)
+    height: Mapped[float] = mapped_column(Float, nullable=False, default=360.0)
+    position_left: Mapped[float] = mapped_column(Float, nullable=False, default=160.0)
+    position_top: Mapped[float] = mapped_column(Float, nullable=False, default=160.0)
+    config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def config(self) -> dict | None:
+        if not self.config_json:
+            return None
+        try:
+            return json.loads(self.config_json)
+        except ValueError:
+            return None
+
+    @config.setter
+    def config(self, value: dict | None) -> None:
+        if value:
+            self.config_json = json.dumps(value)
+        else:
+            self.config_json = None
+
+
+class AudioTrack(Base):
+    """Generated audio artifact."""
+
+    __tablename__ = "audio_tracks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    style: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    voice: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    track_type: Mapped[str] = mapped_column(String(64), nullable=False, default="music")
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 _settings = get_settings()

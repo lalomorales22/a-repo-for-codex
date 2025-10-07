@@ -25,6 +25,9 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
         description="Database connection string",
     )
+    elevenlabs_api_key: Optional[str] = Field(
+        default=None, alias="ELEVENLABS_API_KEY", description="ElevenLabs API key"
+    )
 
     class Config:
         env_file = ".env"

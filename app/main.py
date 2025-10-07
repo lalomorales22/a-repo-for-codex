@@ -14,13 +14,16 @@ from fastapi.templating import Jinja2Templates
 from .config import BASE_DIR, get_settings
 from .database import (
     Agent,
+    AudioTrack,
     Conversation,
     Gallery,
     GalleryAsset,
     Message,
+    WorkspaceWidget,
     init_db,
     session_scope,
 )
+from .elevenlabs_client import ElevenLabsClient
 from .openai_client import OpenAIMegaClient
 from .schemas import (
     AgentBuildRequest,
@@ -29,6 +32,8 @@ from .schemas import (
     AgentPlan,
     AgentRead,
     AgentUpdate,
+    AudioGenerationRequest,
+    AudioTrackRead,
     ConversationCreate,
     ConversationRead,
     ConversationUpdate,
@@ -47,10 +52,14 @@ from .schemas import (
     StudioRenderResponse,
     VideoRequest,
     VideoResponse,
+    WorkspaceWidgetCreate,
+    WorkspaceWidgetRead,
+    WorkspaceWidgetUpdate,
 )
 
 settings = get_settings()
 openai_client = OpenAIMegaClient(settings=settings)
+elevenlabs_client = ElevenLabsClient(settings=settings)
 app = FastAPI(title="OpenAI Mega App", version="1.0.0")
 
 
@@ -268,6 +277,56 @@ def generate_video(request: VideoRequest, db=Depends(get_db)):
     return VideoResponse(asset=GalleryAssetRead.model_validate(asset))
 
 
+@app.get("/api/widgets", response_model=list[WorkspaceWidgetRead])
+def list_widgets(db=Depends(get_db)):
+    widgets = db.query(WorkspaceWidget).order_by(WorkspaceWidget.created_at.asc()).all()
+    return [WorkspaceWidgetRead.model_validate(widget) for widget in widgets]
+
+
+@app.post("/api/widgets", response_model=WorkspaceWidgetRead, status_code=status.HTTP_201_CREATED)
+def create_widget(payload: WorkspaceWidgetCreate, db=Depends(get_db)):
+    widget = WorkspaceWidget(
+        widget_type=payload.widget_type,
+        title=payload.title,
+        width=payload.width,
+        height=payload.height,
+        position_left=payload.position_left,
+        position_top=payload.position_top,
+    )
+    widget.config = payload.config
+    db.add(widget)
+    db.flush()
+    db.refresh(widget)
+    return WorkspaceWidgetRead.model_validate(widget)
+
+
+@app.patch("/api/widgets/{widget_id}", response_model=WorkspaceWidgetRead)
+def update_widget(widget_id: int, payload: WorkspaceWidgetUpdate, db=Depends(get_db)):
+    widget = db.get(WorkspaceWidget, widget_id)
+    if widget is None:
+        raise HTTPException(status_code=404, detail="Widget not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "config" in data:
+        config = data.pop("config")
+        widget.config = config
+    for field, value in data.items():
+        setattr(widget, field, value)
+
+    db.flush()
+    db.refresh(widget)
+    return WorkspaceWidgetRead.model_validate(widget)
+
+
+@app.delete("/api/widgets/{widget_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_widget(widget_id: int, db=Depends(get_db)):
+    widget = db.get(WorkspaceWidget, widget_id)
+    if widget is None:
+        raise HTTPException(status_code=404, detail="Widget not found")
+    db.delete(widget)
+    return None
+
+
 @app.get("/api/galleries", response_model=list[GalleryRead])
 def list_galleries(db=Depends(get_db)):
     galleries = db.query(Gallery).order_by(Gallery.updated_at.desc()).all()
@@ -434,3 +493,45 @@ def build_agent(payload: AgentBuildRequest) -> AgentBuildResponse:
     plan_data = openai_client.plan_agent(brief)
     plan = AgentPlan.model_validate(plan_data)
     return AgentBuildResponse(plan=plan)
+
+
+@app.get("/api/audio-tracks", response_model=list[AudioTrackRead])
+def list_audio_tracks(db=Depends(get_db)):
+    tracks = db.query(AudioTrack).order_by(AudioTrack.created_at.desc()).all()
+    return [AudioTrackRead.model_validate(track) for track in tracks]
+
+
+@app.post("/api/audio-tracks", response_model=AudioTrackRead, status_code=status.HTTP_201_CREATED)
+def generate_audio_track(payload: AudioGenerationRequest, db=Depends(get_db)):
+    audio_info = elevenlabs_client.generate_audio(
+        payload.prompt,
+        title=payload.title,
+        voice=payload.voice,
+        style=payload.style,
+        track_type=payload.track_type,
+        duration_seconds=payload.duration_seconds,
+    )
+
+    track = AudioTrack(
+        title=payload.title,
+        description=audio_info.get("description"),
+        style=audio_info.get("style") or payload.style,
+        duration_seconds=audio_info.get("duration_seconds") or payload.duration_seconds,
+        voice=audio_info.get("voice") or payload.voice,
+        track_type=audio_info.get("track_type") or payload.track_type,
+        url=audio_info["url"],
+        metadata_json=json.dumps(
+            {
+                key: value
+                for key, value in audio_info.items()
+                if key
+                not in {"url", "style", "duration_seconds", "voice", "track_type", "description"}
+            }
+        )
+        if audio_info
+        else None,
+    )
+    db.add(track)
+    db.flush()
+    db.refresh(track)
+    return AudioTrackRead.model_validate(track)
