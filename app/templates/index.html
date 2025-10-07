@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenAI Mega App</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__content">
+        <h1>OpenAI Mega App</h1>
+        <p>
+          A product-minded playground showcasing the latest OpenAI APIs, rich conversation
+          management, and a generative gallery backed by SQLite.
+        </p>
+        <button id="new-conversation" class="btn btn--primary">New Conversation</button>
+      </div>
+      <div class="hero__badge">API-first · Product Ready · PM Portfolio</div>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <h2>Conversations</h2>
+        <ul id="conversation-list" class="conversation-list"></ul>
+      </section>
+
+      <section class="panel">
+        <h2>Chat Workspace</h2>
+        <div id="chat-thread" class="chat-thread"></div>
+        <form id="chat-form" class="chat-form">
+          <textarea id="chat-input" placeholder="Ask anything about your next product milestone..."></textarea>
+          <div class="chat-form__controls">
+            <select id="model-select">
+              <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+              <option value="gpt-4.1">gpt-4.1</option>
+              <option value="o4-mini">o4-mini</option>
+            </select>
+            <button type="submit" class="btn btn--primary">Send</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Generative Gallery</h2>
+        <form id="image-form" class="image-form">
+          <input id="image-prompt" type="text" placeholder="Dream up an illustration..." />
+          <div class="image-form__controls">
+            <select id="image-size">
+              <option value="1024x1024">1024x1024</option>
+              <option value="512x512">512x512</option>
+              <option value="256x256">256x256</option>
+            </select>
+            <select id="image-quality">
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+            <button type="submit" class="btn">Generate</button>
+          </div>
+        </form>
+        <div id="gallery" class="gallery"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Built for aspiring OpenAI product leaders. Configure your <code>OPENAI_API_KEY</code> to go
+        from mock mode to live experiments instantly.
+      </p>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+  </body>
+</html>
