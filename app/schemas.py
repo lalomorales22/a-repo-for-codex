@@ -261,3 +261,79 @@ class AudioTrackRead(BaseModel):
             except ValueError:
                 self.metadata = None
         return self
+
+
+class ConversationSummary(BaseModel):
+    id: int
+    title: str
+    message_count: int
+    updated_at: datetime
+
+
+class GalleryAssetSummary(BaseModel):
+    id: int
+    asset_type: str
+    title: str
+    description: Optional[str]
+    url: str
+    created_at: datetime
+
+
+class AudioTrackSummary(BaseModel):
+    id: int
+    title: str
+    description: Optional[str]
+    style: Optional[str]
+    duration_seconds: Optional[int]
+    voice: Optional[str]
+    track_type: str
+    url: str
+    created_at: datetime
+
+
+class AgentSummary(BaseModel):
+    id: int
+    name: str
+    mission: str
+    capabilities: list[str] = Field(default_factory=list)
+    updated_at: datetime
+
+
+class GallerySummary(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    category: Optional[str]
+    asset_count: int
+    updated_at: datetime
+
+
+class WorkspaceWidgetSummary(BaseModel):
+    id: int
+    title: str
+    widget_type: str
+    width: float
+    height: float
+    config: Optional[dict[str, Any]] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DataCatalogStats(BaseModel):
+    conversations: int
+    messages: int
+    gallery_assets: int
+    galleries: int
+    agents: int
+    audio_tracks: int
+    widgets: int
+
+
+class DataCatalogResponse(BaseModel):
+    stats: DataCatalogStats
+    conversations: list[ConversationSummary] = Field(default_factory=list)
+    assets: list[GalleryAssetSummary] = Field(default_factory=list)
+    audio: list[AudioTrackSummary] = Field(default_factory=list)
+    agents: list[AgentSummary] = Field(default_factory=list)
+    galleries: list[GallerySummary] = Field(default_factory=list)
+    widgets: list[WorkspaceWidgetSummary] = Field(default_factory=list)

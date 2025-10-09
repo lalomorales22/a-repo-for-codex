@@ -20,6 +20,7 @@ const state = {
   currentAgentId: null,
   agentPlan: null,
   audioTracks: [],
+  dataCatalog: null,
 };
 
 const conversationListEl = document.getElementById('conversation-list');
@@ -40,6 +41,12 @@ const zoomButtons = document.querySelectorAll('[data-zoom]');
 const dropdownEl = document.querySelector('[data-dropdown]');
 const addWidgetBtn = document.getElementById('add-widget');
 const addWidgetOptions = dropdownEl ? dropdownEl.querySelectorAll('.dropdown__item') : [];
+const dataPanelEl = document.getElementById('data');
+const dataToggleBtn = document.getElementById('data-toggle');
+const dataCloseBtn = document.getElementById('data-close');
+const dataSummaryEl = document.getElementById('data-summary');
+const dataCatalogEl = document.getElementById('data-catalog');
+const dataStatusEl = document.getElementById('data-status');
 const agentsPanelEl = document.getElementById('agents');
 const agentsToggleBtn = document.getElementById('agents-toggle');
 const agentsCloseBtn = document.getElementById('agents-close');
@@ -3108,6 +3115,16 @@ function handlePointerUp(event) {
   pointerInteraction = null;
 }
 
+function toggleData(open) {
+  if (!dataPanelEl) return;
+  const isOpen = open ?? !dataPanelEl.classList.contains('is-open');
+  dataPanelEl.classList.toggle('is-open', Boolean(isOpen));
+  dataPanelEl.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  if (isOpen) {
+    loadDataCatalog(true);
+  }
+}
+
 function toggleAgents(open) {
   if (!agentsPanelEl) return;
   const isOpen = open ?? !agentsPanelEl.classList.contains('is-open');
@@ -3241,6 +3258,356 @@ async function handleAudioGenerate(event) {
   }
 }
 
+function formatDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function truncateText(value, maxLength = 160) {
+  if (!value) return '';
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function setDataStatus(message, variant = 'info') {
+  if (!dataStatusEl) return;
+  dataStatusEl.textContent = message || '';
+  dataStatusEl.classList.remove('is-error', 'is-success');
+  if (variant === 'error') {
+    dataStatusEl.classList.add('is-error');
+  } else if (variant === 'success') {
+    dataStatusEl.classList.add('is-success');
+  }
+}
+
+function createDataCard({ tag, title, meta, description, timestamp }) {
+  const card = document.createElement('article');
+  card.className = 'data-card';
+
+  if (tag || timestamp) {
+    const header = document.createElement('header');
+    header.className = 'data-card__header';
+    if (tag) {
+      const tagEl = document.createElement('span');
+      tagEl.className = 'data-card__tag';
+      tagEl.textContent = tag;
+      header.appendChild(tagEl);
+    }
+    if (timestamp) {
+      const timeEl = document.createElement('time');
+      timeEl.className = 'data-card__time';
+      const date = new Date(timestamp);
+      if (!Number.isNaN(date.getTime())) {
+        timeEl.dateTime = date.toISOString();
+        timeEl.textContent = formatDateTime(date);
+      }
+      header.appendChild(timeEl);
+    }
+    card.appendChild(header);
+  }
+
+  const titleEl = document.createElement('h4');
+  titleEl.className = 'data-card__title';
+  titleEl.textContent = title || 'Untitled record';
+  card.appendChild(titleEl);
+
+  if (meta) {
+    const metaEl = document.createElement('p');
+    metaEl.className = 'data-card__meta';
+    metaEl.textContent = meta;
+    card.appendChild(metaEl);
+  }
+
+  if (description) {
+    const descriptionEl = document.createElement('p');
+    descriptionEl.className = 'data-card__description';
+    descriptionEl.textContent = description;
+    card.appendChild(descriptionEl);
+  }
+
+  return card;
+}
+
+function renderDataSummary() {
+  if (!dataSummaryEl) return;
+  dataSummaryEl.innerHTML = '';
+  const stats = state.dataCatalog?.stats;
+  if (!stats) return;
+  const summaryItems = [
+    { key: 'conversations', label: 'Conversations', hint: 'Strategy threads driving the work.' },
+    { key: 'messages', label: 'Messages', hint: 'Ideas exchanged with copilots.' },
+    { key: 'gallery_assets', label: 'Visual assets', hint: 'Images and videos in the gallery.' },
+    { key: 'galleries', label: 'Galleries', hint: 'Curated collections ready to share.' },
+    { key: 'agents', label: 'Agents', hint: 'Automation teammates on call.' },
+    { key: 'audio_tracks', label: 'Audio tracks', hint: 'Soundscapes crafted in the studio.' },
+    { key: 'widgets', label: 'Widgets', hint: 'Custom software blocks on the canvas.' },
+  ];
+
+  summaryItems.forEach(({ key, label, hint }) => {
+    const value = Number.isFinite(stats[key]) ? stats[key] : 0;
+    const item = document.createElement('li');
+    item.className = 'data-summary__item';
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'data-summary__label';
+    labelEl.textContent = label;
+    item.appendChild(labelEl);
+
+    const countEl = document.createElement('span');
+    countEl.className = 'data-summary__count';
+    countEl.textContent = value.toLocaleString();
+    item.appendChild(countEl);
+
+    if (hint) {
+      const hintEl = document.createElement('p');
+      hintEl.className = 'data-summary__hint';
+      hintEl.textContent = hint;
+      item.appendChild(hintEl);
+    }
+
+    dataSummaryEl.appendChild(item);
+  });
+}
+
+function renderDataCatalog() {
+  if (!dataCatalogEl) return;
+  dataCatalogEl.innerHTML = '';
+  const catalog = state.dataCatalog;
+  if (!catalog) return;
+
+  const assetItems = Array.isArray(catalog.assets) ? catalog.assets : [];
+  const audioItems = Array.isArray(catalog.audio) ? catalog.audio : [];
+  const agentItems = Array.isArray(catalog.agents) ? catalog.agents : [];
+  const conversationItems = Array.isArray(catalog.conversations) ? catalog.conversations : [];
+  const galleryItems = Array.isArray(catalog.galleries) ? catalog.galleries : [];
+  const widgetItems = Array.isArray(catalog.widgets) ? catalog.widgets : [];
+
+  const sections = [
+    {
+      title: 'Visual assets',
+      meta: assetItems.length ? `${assetItems.length} recent` : 'No visuals yet',
+      description: 'Images and motion published from the studio.',
+      items: assetItems,
+      empty: 'When you generate images or video, they will land here automatically.',
+      render: (asset) => {
+        if (!asset) return null;
+        const tag = asset.asset_type === 'video' ? 'Video' : 'Image';
+        const metaParts = [tag];
+        const description = truncateText(asset.description, 140);
+        return createDataCard({
+          tag,
+          title: asset.title,
+          meta: metaParts.filter(Boolean).join(' • '),
+          description,
+          timestamp: asset.created_at,
+        });
+      },
+    },
+    {
+      title: 'Audio library',
+      meta: audioItems.length ? `${audioItems.length} fresh tracks` : 'No audio yet',
+      description: 'Music, narration, and sound effects generated with ElevenLabs.',
+      items: audioItems,
+      empty: 'Compose a track in the audio workspace to fill the sound archive.',
+      render: (track) => {
+        if (!track) return null;
+        const metaParts = [track.track_type];
+        if (track.style) metaParts.push(track.style);
+        if (track.voice) metaParts.push(`voice: ${track.voice}`);
+        if (track.duration_seconds) metaParts.push(formatDuration(track.duration_seconds));
+        return createDataCard({
+          tag: 'Audio',
+          title: track.title,
+          meta: metaParts.filter(Boolean).join(' • '),
+          description: truncateText(track.description, 140),
+          timestamp: track.created_at,
+        });
+      },
+    },
+    {
+      title: 'Automation agents',
+      meta: agentItems.length ? `${agentItems.length} active` : 'No agents yet',
+      description: 'Blueprints, missions, and capabilities for your AI teammates.',
+      items: agentItems,
+      empty: 'Generate an agent plan to start building your autonomous crew.',
+      render: (agent) => {
+        if (!agent) return null;
+        const metaParts = [];
+        if (Array.isArray(agent.capabilities) && agent.capabilities.length) {
+          metaParts.push(agent.capabilities.join(', '));
+        }
+        return createDataCard({
+          tag: 'Agent',
+          title: agent.name,
+          meta: metaParts.join(' • '),
+          description: truncateText(agent.mission, 160),
+          timestamp: agent.updated_at,
+        });
+      },
+    },
+    {
+      title: 'Conversation intelligence',
+      meta: conversationItems.length ? `${conversationItems.length} threads` : 'No conversations yet',
+      description: 'Research, planning, and customer feedback sessions.',
+      items: conversationItems,
+      empty: 'Kick off a new conversation to seed this knowledge base.',
+      render: (conversation) => {
+        if (!conversation) return null;
+        const messageCount = conversation.message_count || 0;
+        const metaParts = [`${messageCount} ${messageCount === 1 ? 'message' : 'messages'}`];
+        return createDataCard({
+          tag: 'Conversation',
+          title: conversation.title,
+          meta: metaParts.join(' • '),
+          description: `Last update ${formatDateTime(conversation.updated_at)}`,
+          timestamp: conversation.updated_at,
+        });
+      },
+    },
+    {
+      title: 'Curated galleries',
+      meta: galleryItems.length ? `${galleryItems.length} collections` : 'No galleries yet',
+      description: 'Organized sets of assets ready for campaigns and presentations.',
+      items: galleryItems,
+      empty: 'Create a gallery in the studio to keep launches organized.',
+      render: (gallery) => {
+        if (!gallery) return null;
+        const metaParts = [];
+        if (gallery.category) metaParts.push(gallery.category);
+        if (Number.isFinite(gallery.asset_count)) {
+          metaParts.push(`${gallery.asset_count} assets`);
+        }
+        return createDataCard({
+          tag: 'Gallery',
+          title: gallery.name,
+          meta: metaParts.join(' • '),
+          description: truncateText(gallery.description, 160),
+          timestamp: gallery.updated_at,
+        });
+      },
+    },
+    {
+      title: 'Workspace software',
+      meta: widgetItems.length ? `${widgetItems.length} widgets` : 'No widgets yet',
+      description: 'Persisted canvas widgets and bespoke tools.',
+      items: widgetItems,
+      empty: 'Add a widget from the canvas toolbar to populate this list.',
+      render: (widget) => {
+        if (!widget) return null;
+        const metaParts = [widget.widget_type];
+        if (widget.width && widget.height) {
+          metaParts.push(`${Math.round(widget.width)} × ${Math.round(widget.height)} px`);
+        }
+        return createDataCard({
+          tag: 'Widget',
+          title: widget.title,
+          meta: metaParts.filter(Boolean).join(' • '),
+          description: widget.config?.description
+            ? truncateText(widget.config.description, 140)
+            : '',
+          timestamp: widget.updated_at,
+        });
+      },
+    },
+  ];
+
+  sections.forEach((section) => {
+    const sectionEl = document.createElement('section');
+    sectionEl.className = 'data-catalog__section';
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'data-catalog__header';
+
+    const titleEl = document.createElement('h3');
+    titleEl.className = 'data-catalog__title';
+    titleEl.textContent = section.title;
+    headerEl.appendChild(titleEl);
+
+    if (section.meta) {
+      const metaEl = document.createElement('p');
+      metaEl.className = 'data-catalog__meta';
+      metaEl.textContent = section.meta;
+      headerEl.appendChild(metaEl);
+    }
+
+    sectionEl.appendChild(headerEl);
+
+    if (section.description) {
+      const descriptionEl = document.createElement('p');
+      descriptionEl.className = 'data-catalog__meta';
+      descriptionEl.textContent = section.description;
+      sectionEl.appendChild(descriptionEl);
+    }
+
+    if (!section.items.length) {
+      const emptyEl = document.createElement('p');
+      emptyEl.className = 'data-catalog__empty';
+      emptyEl.textContent = section.empty;
+      sectionEl.appendChild(emptyEl);
+    } else {
+      const listEl = document.createElement('ul');
+      listEl.className = 'data-catalog__list';
+      section.items.forEach((item) => {
+        const card = section.render(item);
+        if (!card) return;
+        const listItem = document.createElement('li');
+        listItem.appendChild(card);
+        listEl.appendChild(listItem);
+      });
+      if (listEl.childElementCount) {
+        sectionEl.appendChild(listEl);
+      } else {
+        const emptyEl = document.createElement('p');
+        emptyEl.className = 'data-catalog__empty';
+        emptyEl.textContent = section.empty;
+        sectionEl.appendChild(emptyEl);
+      }
+    }
+
+    dataCatalogEl.appendChild(sectionEl);
+  });
+}
+
+function renderDataWarehouse() {
+  renderDataSummary();
+  renderDataCatalog();
+}
+
+async function loadDataCatalog(forceRefresh = false) {
+  if (!dataPanelEl) return;
+  if (!forceRefresh && state.dataCatalog) {
+    renderDataWarehouse();
+    setDataStatus('');
+    return;
+  }
+
+  if (dataSummaryEl) {
+    dataSummaryEl.innerHTML = '';
+  }
+  if (dataCatalogEl) {
+    dataCatalogEl.innerHTML = '';
+    dataCatalogEl.setAttribute('aria-busy', 'true');
+  }
+
+  setDataStatus('Loading the data backend mega gallery…');
+
+  try {
+    const payload = await fetchJSON('/api/data-catalog');
+    state.dataCatalog = payload;
+    renderDataWarehouse();
+    setDataStatus('Mega gallery synced.', 'success');
+  } catch (error) {
+    console.error(error);
+    setDataStatus('Unable to load the data backend right now.', 'error');
+  } finally {
+    if (dataCatalogEl) {
+      dataCatalogEl.setAttribute('aria-busy', 'false');
+    }
+  }
+}
+
 function initialiseWidgets() {
   if (!canvasContentEl) return;
   canvasContentEl.querySelectorAll('.widget').forEach((widget) => {
@@ -3323,6 +3690,14 @@ addWidgetOptions.forEach((option) => {
   option.addEventListener('click', handleAddWidgetOption);
 });
 
+if (dataToggleBtn) {
+  dataToggleBtn.addEventListener('click', () => toggleData(true));
+}
+
+if (dataCloseBtn) {
+  dataCloseBtn.addEventListener('click', () => toggleData(false));
+}
+
 if (canvasContentEl) {
   canvasContentEl.addEventListener('pointerdown', handlePointerDown);
   canvasContentEl.addEventListener('click', handleWidgetAction);
@@ -3385,6 +3760,10 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     if (studioEl && studioEl.classList.contains('is-open')) {
       toggleStudio(false);
+      return;
+    }
+    if (dataPanelEl && dataPanelEl.classList.contains('is-open')) {
+      toggleData(false);
       return;
     }
     if (agentsPanelEl && agentsPanelEl.classList.contains('is-open')) {
