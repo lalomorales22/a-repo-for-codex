@@ -442,13 +442,13 @@ function createImageWidget(record) {
   widget.className = 'widget';
   widget.dataset.widget = '';
   widget.dataset.widgetType = 'image';
-  const width = record?.width ?? 420;
-  const height = record?.height ?? 430;
+  const width = record?.width ?? 480;
+  const height = record?.height ?? 520;
   const position = record
     ? { left: record.position_left, top: record.position_top }
     : (() => {
         const next = nextWidgetPosition();
-        return { left: next.left + 120, top: next.top + 60 };
+        return { left: next.left + 96, top: next.top + 32 };
       })();
   widget.style.width = `${width}px`;
   widget.style.height = `${height}px`;
@@ -457,7 +457,7 @@ function createImageWidget(record) {
   if (record?.id) {
     widget.dataset.widgetId = String(record.id);
   }
-  const widgetTitle = record?.title ?? 'Image generator';
+  const widgetTitle = record?.title ?? 'Image studio';
   widget.innerHTML = `
     <header class="widget__header" data-drag-handle>
       <h2 class="widget__title">${widgetTitle}</h2>
@@ -467,32 +467,54 @@ function createImageWidget(record) {
       </div>
     </header>
     <div class="widget__body">
-      <form class="widget-form" data-image-form>
-        <label class="widget-field">
-          <span>Prompt</span>
-          <textarea name="prompt" placeholder="Describe the visual you're imagining..." required></textarea>
-        </label>
-        <div class="widget-form__row">
-          <label class="widget-field">
-            <span>Size</span>
-            <select name="size">
-              <option value="1024x1024">1024 × 1024</option>
-              <option value="512x512">512 × 512</option>
-              <option value="256x256">256 × 256</option>
-            </select>
-          </label>
-          <label class="widget-field">
-            <span>Quality</span>
-            <select name="quality">
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-          </label>
-        </div>
-        <button type="submit" class="btn btn--primary">Generate image</button>
-      </form>
-      <p class="widget__hint" data-status>Outputs land in the generative feed.</p>
+      <div class="widget-app widget-app--split image-widget">
+        <section class="widget-app__panel image-widget__composer" aria-label="Image prompt builder">
+          <div class="widget-app__panel-header">
+            <h3>Prompt builder</h3>
+            <div class="image-widget__presets" data-image-presets>
+              <button type="button" class="chip" data-image-preset data-prompt="Product hero shot, studio lighting, crisp shadows">Product hero</button>
+              <button type="button" class="chip" data-image-preset data-prompt="Concept art of a futuristic control room, volumetric light">Futuristic control</button>
+              <button type="button" class="chip" data-image-preset data-prompt="Moodboard of playful mascot illustrations, flat design">Mascot board</button>
+            </div>
+          </div>
+          <form class="widget-form image-widget__form" data-image-form>
+            <label class="widget-field">
+              <span>Prompt</span>
+              <textarea name="prompt" placeholder="Describe the visual you're imagining..." required></textarea>
+            </label>
+            <div class="widget-form__row">
+              <label class="widget-field">
+                <span>Size</span>
+                <select name="size">
+                  <option value="1024x1024">1024 × 1024</option>
+                  <option value="512x512">512 × 512</option>
+                  <option value="256x256">256 × 256</option>
+                </select>
+              </label>
+              <label class="widget-field">
+                <span>Quality</span>
+                <select name="quality">
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+            </div>
+            <div class="image-widget__controls">
+              <div class="image-widget__status" data-status>Outputs land in the generative feed.</div>
+              <button type="submit" class="btn btn--primary">Render image</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel image-widget__gallery" aria-label="Recent image renders">
+          <div class="widget-app__panel-header">
+            <h3>Recent renders</h3>
+            <button type="button" class="btn btn--ghost btn--sm" data-open-feed>Open feed</button>
+          </div>
+          <div class="image-widget__grid" data-image-widget-gallery></div>
+          <p class="widget__hint image-widget__empty" data-image-widget-empty>No renders yet. Generate an image to fill this gallery.</p>
+        </section>
+      </div>
     </div>
     <div class="widget__resize" data-resize aria-hidden="true"></div>
   `;
@@ -502,7 +524,29 @@ function createImageWidget(record) {
   }
   const form = widget.querySelector('[data-image-form]');
   const statusEl = widget.querySelector('[data-status]');
+  const presets = widget.querySelectorAll('[data-image-preset]');
+  const feedButton = widget.querySelector('[data-open-feed]');
+  if (feedButton) {
+    feedButton.addEventListener('click', () => {
+      const feedWidget = document.getElementById('widget-feed');
+      if (feedWidget) {
+        feedWidget.hidden = false;
+        feedWidget.classList.remove('is-minimized');
+        focusWidget(feedWidget);
+      }
+    });
+  }
   if (form) {
+    const promptField = form.querySelector('[name="prompt"]');
+    presets.forEach((button) => {
+      button.addEventListener('click', () => {
+        const preset = button.dataset.prompt || button.textContent || '';
+        if (promptField) {
+          promptField.value = preset;
+          promptField.focus();
+        }
+      });
+    });
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const formData = new FormData(form);
@@ -510,8 +554,9 @@ function createImageWidget(record) {
       if (!prompt) return;
       const size = formData.get('size') || '1024x1024';
       const quality = formData.get('quality') || 'high';
-      form.querySelector('button[type="submit"]').disabled = true;
-      if (statusEl) statusEl.textContent = 'Generating…';
+      const submitButton = form.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
+      if (statusEl) statusEl.textContent = 'Generating image…';
       try {
         await fetchJSON('/api/images', {
           method: 'POST',
@@ -523,18 +568,18 @@ function createImageWidget(record) {
           }),
         });
         form.reset();
-        if (statusEl) statusEl.textContent = 'Image created! Check the generative feed.';
+        if (statusEl) statusEl.textContent = 'Image saved to the feed.';
         await loadGallery();
         await loadGalleries();
       } catch (error) {
         console.error(error);
         if (statusEl) statusEl.textContent = 'Generation failed. Verify your API configuration.';
       } finally {
-        const button = form.querySelector('button[type="submit"]');
-        if (button) button.disabled = false;
+        if (submitButton) submitButton.disabled = false;
       }
     });
   }
+  renderImageWidgetGalleries();
   return widget;
 }
 
@@ -543,13 +588,13 @@ function createVideoWidget(record) {
   widget.className = 'widget';
   widget.dataset.widget = '';
   widget.dataset.widgetType = 'video';
-  const width = record?.width ?? 440;
-  const height = record?.height ?? 460;
+  const width = record?.width ?? 560;
+  const height = record?.height ?? 560;
   const position = record
     ? { left: record.position_left, top: record.position_top }
     : (() => {
         const next = nextWidgetPosition();
-        return { left: next.left + 220, top: next.top + 120 };
+        return { left: next.left + 220, top: next.top + 96 };
       })();
   widget.style.width = `${width}px`;
   widget.style.height = `${height}px`;
@@ -558,7 +603,7 @@ function createVideoWidget(record) {
   if (record?.id) {
     widget.dataset.widgetId = String(record.id);
   }
-  const widgetTitle = record?.title ?? 'Video generator';
+  const widgetTitle = record?.title ?? 'Video lab';
   widget.innerHTML = `
     <header class="widget__header" data-drag-handle>
       <h2 class="widget__title">${widgetTitle}</h2>
@@ -568,28 +613,55 @@ function createVideoWidget(record) {
       </div>
     </header>
     <div class="widget__body">
-      <form class="widget-form" data-video-form>
-        <label class="widget-field">
-          <span>Prompt</span>
-          <textarea name="prompt" placeholder="Direct a short product teaser..." required></textarea>
-        </label>
-        <div class="widget-form__row">
-          <label class="widget-field">
-            <span>Aspect ratio</span>
-            <select name="aspect_ratio">
-              <option value="16:9">16:9</option>
-              <option value="9:16">9:16</option>
-              <option value="1:1">1:1</option>
-            </select>
-          </label>
-          <label class="widget-field">
-            <span>Duration</span>
-            <input name="duration" type="number" min="2" max="60" value="8" />
-          </label>
-        </div>
-        <button type="submit" class="btn btn--primary">Generate video</button>
-      </form>
-      <p class="widget__hint" data-status>Your clips will appear in the feed once ready.</p>
+      <div class="widget-app widget-app--split video-widget">
+        <section class="widget-app__panel video-widget__director" aria-label="Storyboard controls">
+          <div class="widget-app__panel-header">
+            <h3>Storyboard</h3>
+            <div class="video-widget__beats" data-video-presets>
+              <button type="button" class="chip" data-video-preset data-prompt="Scene opens on a macro shot of the product with cinematic lighting">Macro opener</button>
+              <button type="button" class="chip" data-video-preset data-prompt="Cut to a user interacting joyfully with the interface, handheld camera">User moment</button>
+              <button type="button" class="chip" data-video-preset data-prompt="Closing hero shot with on-screen metrics and bold typography">Hero outro</button>
+            </div>
+          </div>
+          <div class="video-widget__timeline">
+            <span class="video-widget__marker">Beat 1</span>
+            <span class="video-widget__marker">Beat 2</span>
+            <span class="video-widget__marker">Beat 3</span>
+          </div>
+          <form class="widget-form" data-video-form>
+            <label class="widget-field">
+              <span>Prompt</span>
+              <textarea name="prompt" placeholder="Direct a short product teaser..." required></textarea>
+            </label>
+            <div class="widget-form__row">
+              <label class="widget-field">
+                <span>Aspect ratio</span>
+                <select name="aspect_ratio">
+                  <option value="16:9">16:9</option>
+                  <option value="9:16">9:16</option>
+                  <option value="1:1">1:1</option>
+                </select>
+              </label>
+              <label class="widget-field">
+                <span>Duration</span>
+                <input name="duration" type="number" min="2" max="60" value="8" />
+              </label>
+            </div>
+            <div class="video-widget__controls">
+              <div class="video-widget__status" data-status>Your clips will appear in the feed once ready.</div>
+              <button type="submit" class="btn btn--primary">Render storyboard</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel video-widget__reel" aria-label="Latest video renders">
+          <div class="widget-app__panel-header">
+            <h3>Latest cuts</h3>
+            <button type="button" class="btn btn--ghost btn--sm" data-open-feed>Open feed</button>
+          </div>
+          <div class="video-widget__grid" data-video-widget-gallery></div>
+          <p class="widget__hint video-widget__empty" data-video-widget-empty>No clips yet. Render a storyboard to see previews.</p>
+        </section>
+      </div>
     </div>
     <div class="widget__resize" data-resize aria-hidden="true"></div>
   `;
@@ -599,7 +671,32 @@ function createVideoWidget(record) {
   }
   const form = widget.querySelector('[data-video-form]');
   const statusEl = widget.querySelector('[data-status]');
+  const presets = widget.querySelectorAll('[data-video-preset]');
+  const feedButton = widget.querySelector('[data-open-feed]');
+  if (feedButton) {
+    feedButton.addEventListener('click', () => {
+      const feedWidget = document.getElementById('widget-feed');
+      if (feedWidget) {
+        feedWidget.hidden = false;
+        feedWidget.classList.remove('is-minimized');
+        focusWidget(feedWidget);
+      }
+    });
+  }
   if (form) {
+    const promptField = form.querySelector('[name="prompt"]');
+    presets.forEach((button) => {
+      button.addEventListener('click', () => {
+        const preset = button.dataset.prompt || button.textContent || '';
+        if (promptField) {
+          const existing = promptField.value.trim();
+          promptField.value = existing
+            ? `${existing}\n${preset}`
+            : preset;
+          promptField.focus();
+        }
+      });
+    });
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const formData = new FormData(form);
@@ -607,8 +704,9 @@ function createVideoWidget(record) {
       if (!prompt) return;
       const aspectRatio = formData.get('aspect_ratio') || '16:9';
       const duration = Number(formData.get('duration')) || 8;
-      form.querySelector('button[type="submit"]').disabled = true;
-      if (statusEl) statusEl.textContent = 'Generating…';
+      const submitButton = form.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
+      if (statusEl) statusEl.textContent = 'Rendering storyboard…';
       try {
         await fetchJSON('/api/videos', {
           method: 'POST',
@@ -620,18 +718,18 @@ function createVideoWidget(record) {
           }),
         });
         form.reset();
-        if (statusEl) statusEl.textContent = 'Video render queued!';
+        if (statusEl) statusEl.textContent = 'Video queued and saved to the feed.';
         await loadGallery();
         await loadGalleries();
       } catch (error) {
         console.error(error);
         if (statusEl) statusEl.textContent = 'Generation failed. Check your server logs.';
       } finally {
-        const button = form.querySelector('button[type="submit"]');
-        if (button) button.disabled = false;
+        if (submitButton) submitButton.disabled = false;
       }
     });
   }
+  renderVideoWidgetReels();
   return widget;
 }
 
@@ -640,8 +738,8 @@ function createWorldWidget(record) {
   widget.className = 'widget';
   widget.dataset.widget = '';
   widget.dataset.widgetType = 'world';
-  const width = record?.width ?? 420;
-  const height = record?.height ?? 400;
+  const width = record?.width ?? 560;
+  const height = record?.height ?? 460;
   const position = record
     ? { left: record.position_left, top: record.position_top }
     : (() => {
@@ -665,10 +763,28 @@ function createWorldWidget(record) {
       </div>
     </header>
     <div class="widget__body">
-      <p class="widget__hint">Sketch ideas for immersive spaces and keep notes synced for future API hooks.</p>
-      <textarea class="widget-note" placeholder="Outline your world, actors, and core interactions..."></textarea>
-      <button type="button" class="btn btn--primary" data-save-world>Save concept</button>
-      <p class="widget__hint" data-status>This concept saves locally for now. Database sync coming soon.</p>
+      <div class="widget-app widget-app--split world-widget">
+        <section class="widget-app__panel world-widget__scene" aria-label="Spatial overview">
+          <div class="world-widget__canvas">
+            <div class="world-widget__pin world-widget__pin--spawn">Spawn</div>
+            <div class="world-widget__pin world-widget__pin--event">Event hub</div>
+            <div class="world-widget__pin world-widget__pin--boss">Set piece</div>
+          </div>
+          <ul class="world-widget__layers">
+            <li><span>Biome palette</span> Aurora tundra</li>
+            <li><span>Day/night</span> Twin suns orbit</li>
+            <li><span>Traversal</span> Hover rails &amp; portals</li>
+          </ul>
+        </section>
+        <section class="widget-app__panel world-widget__notebook" aria-label="World notes">
+          <h3>Concept notes</h3>
+          <textarea class="world-widget__editor" placeholder="Outline your world, actors, and core interactions..."></textarea>
+          <div class="world-widget__actions">
+            <button type="button" class="btn btn--primary" data-save-world>Save concept</button>
+            <span class="world-widget__status" data-status>This concept saves locally for now. Database sync coming soon.</span>
+          </div>
+        </section>
+      </div>
     </div>
     <div class="widget__resize" data-resize aria-hidden="true"></div>
   `;
@@ -678,10 +794,14 @@ function createWorldWidget(record) {
   }
   const saveButton = widget.querySelector('[data-save-world]');
   const statusEl = widget.querySelector('[data-status]');
+  const editor = widget.querySelector('.world-widget__editor');
   if (saveButton) {
     saveButton.addEventListener('click', () => {
       if (statusEl) {
-        statusEl.textContent = 'Concept noted! Future releases will persist this to the database.';
+        const excerpt = editor?.value.trim();
+        statusEl.textContent = excerpt
+          ? `Concept saved locally • ${Math.min(excerpt.length, 80)} characters captured`
+          : 'Concept noted! Future releases will persist this to the database.';
       }
     });
   }
@@ -693,8 +813,8 @@ function createAgentWidget(record) {
   widget.className = 'widget';
   widget.dataset.widget = '';
   widget.dataset.widgetType = 'agent';
-  const width = record?.width ?? 420;
-  const height = record?.height ?? 380;
+  const width = record?.width ?? 520;
+  const height = record?.height ?? 420;
   const position = record
     ? { left: record.position_left, top: record.position_top }
     : (() => {
@@ -718,10 +838,28 @@ function createAgentWidget(record) {
       </div>
     </header>
     <div class="widget__body">
-      <p class="widget__hint">Monitor automation teammates and jump into the full workspace.</p>
-      <ul class="agents-widget__list" data-agent-widget-list></ul>
-      <p class="widget__hint" data-agent-widget-empty hidden>No agents yet. Launch one with the AI builder.</p>
-      <button type="button" class="btn btn--primary" data-open-agents>Open agents workspace</button>
+      <div class="widget-app widget-app--split agent-widget">
+        <section class="widget-app__panel agent-widget__summary" aria-label="Roster health">
+          <h3>Roster health</h3>
+          <div class="agent-widget__metric">
+            <span>Active agents</span>
+            <strong data-agent-widget-count>0</strong>
+          </div>
+          <div class="agent-widget__metric">
+            <span>Draft plans</span>
+            <strong data-agent-widget-plan>0</strong>
+          </div>
+          <p class="agent-widget__status" data-agent-widget-status>Launch your first automation teammate to see activity here.</p>
+        </section>
+        <section class="widget-app__panel agent-widget__list" aria-label="Agents">
+          <div class="widget-app__panel-header">
+            <h3>Active roster</h3>
+            <button type="button" class="btn btn--ghost btn--sm" data-open-agents>Open agents workspace</button>
+          </div>
+          <ul class="agents-widget__list" data-agent-widget-list></ul>
+          <p class="widget__hint agent-widget__empty" data-agent-widget-empty hidden>No agents yet. Launch one with the AI builder.</p>
+        </section>
+      </div>
     </div>
     <div class="widget__resize" data-resize aria-hidden="true"></div>
   `;
@@ -744,28 +882,43 @@ function createCodeWidget(record) {
     height: 520,
     offset: { left: 300, top: 200 },
     body: `
-      <form class="widget-form code-widget" data-code-form>
-        <label class="widget-field">
-          <span>Language</span>
-          <select name="language">
-            <option value="JavaScript">JavaScript</option>
-            <option value="Python">Python</option>
-            <option value="Node">Node</option>
-          </select>
-        </label>
-        <label class="widget-field">
-          <span>Snippet</span>
-          <textarea name="snippet" class="code-widget__editor" placeholder="Write or paste code to simulate…" required></textarea>
-        </label>
-        <div class="widget-form__actions">
-          <button type="submit" class="btn btn--primary">Run sandbox</button>
-        </div>
-      </form>
-      <pre class="code-widget__output" data-code-output>// Awaiting snippet to simulate execution.</pre>
+      <div class="widget-app widget-app--split code-widget">
+        <section class="widget-app__panel code-widget__panel" aria-label="Code editor">
+          <div class="widget-app__panel-header">
+            <h3>Editor</h3>
+            <span class="code-widget__environment" data-code-env>Sandbox idle</span>
+          </div>
+          <form class="widget-form code-widget__form" data-code-form>
+            <label class="widget-field">
+              <span>Language</span>
+              <select name="language">
+                <option value="JavaScript">JavaScript</option>
+                <option value="Python">Python</option>
+                <option value="Node">Node</option>
+              </select>
+            </label>
+            <label class="widget-field">
+              <span>Snippet</span>
+              <textarea name="snippet" class="code-widget__editor" placeholder="Write or paste code to simulate…" required></textarea>
+            </label>
+            <div class="widget-form__actions">
+              <button type="submit" class="btn btn--primary">Run sandbox</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel code-widget__console" aria-live="polite">
+          <div class="widget-app__panel-header">
+            <h3>Console</h3>
+            <span class="code-widget__hint">Outputs are simulated</span>
+          </div>
+          <pre class="code-widget__output" data-code-output>// Awaiting snippet to simulate execution.</pre>
+        </section>
+      </div>
     `,
   });
   const form = widget.querySelector('[data-code-form]');
   const output = widget.querySelector('[data-code-output]');
+  const envIndicator = widget.querySelector('[data-code-env]');
   if (form && output) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -773,6 +926,10 @@ function createCodeWidget(record) {
       const snippet = form.querySelector('[name="snippet"]').value.trim();
       if (!snippet) return;
       output.textContent = `// Simulated ${language} run\n${snippet}\n\n// Results will appear once runtime APIs are wired up.`;
+      if (envIndicator) {
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        envIndicator.textContent = `${language} • ${timestamp}`;
+      }
     });
   }
   return widget;
@@ -785,24 +942,39 @@ function createDocumentWidget(record) {
     height: 500,
     offset: { left: 360, top: 140 },
     body: `
-      <form class="widget-form" data-document-form>
-        <label class="widget-field">
-          <span>Working title</span>
-          <input type="text" name="title" placeholder="Growth strategy brief" required />
-        </label>
-        <label class="widget-field">
-          <span>Key points</span>
-          <textarea name="outline" placeholder="Bullet out the narrative and supporting points" required></textarea>
-        </label>
-        <div class="widget-form__actions">
-          <button type="submit" class="btn btn--primary">Draft outline</button>
-        </div>
-      </form>
-      <article class="document-widget__preview" data-document-output aria-live="polite"></article>
+      <div class="widget-app widget-app--split document-widget">
+        <section class="widget-app__panel document-widget__composer" aria-label="Outline builder">
+          <div class="widget-app__panel-header">
+            <h3>Outline</h3>
+            <span class="document-widget__badge">Draft mode</span>
+          </div>
+          <form class="widget-form" data-document-form>
+            <label class="widget-field">
+              <span>Working title</span>
+              <input type="text" name="title" placeholder="Growth strategy brief" required />
+            </label>
+            <label class="widget-field">
+              <span>Key points</span>
+              <textarea name="outline" placeholder="Bullet out the narrative and supporting points" required></textarea>
+            </label>
+            <div class="widget-form__actions">
+              <button type="submit" class="btn btn--primary">Draft outline</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel document-widget__preview-panel" aria-live="polite">
+          <div class="widget-app__panel-header">
+            <h3>Preview</h3>
+            <span class="document-widget__status" data-document-status>Awaiting draft</span>
+          </div>
+          <article class="document-widget__preview" data-document-output></article>
+        </section>
+      </div>
     `,
   });
   const form = widget.querySelector('[data-document-form]');
   const output = widget.querySelector('[data-document-output]');
+  const statusEl = widget.querySelector('[data-document-status]');
   if (form && output) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -818,6 +990,9 @@ function createDocumentWidget(record) {
         <ul>${outline.slice(1).map((item) => `<li>${item}</li>`).join('')}</ul>
         <p class="document-widget__hint">Full draft will render here once the document API is linked.</p>
       `;
+      if (statusEl) {
+        statusEl.textContent = 'Draft ready';
+      }
     });
   }
   return widget;
@@ -830,24 +1005,39 @@ function createPresentationWidget(record) {
     height: 520,
     offset: { left: 420, top: 220 },
     body: `
-      <form class="widget-form" data-presentation-form>
-        <label class="widget-field">
-          <span>Audience</span>
-          <input type="text" name="audience" placeholder="Product leadership" required />
-        </label>
-        <label class="widget-field">
-          <span>Slide notes</span>
-          <textarea name="slides" placeholder="One slide idea per line" required></textarea>
-        </label>
-        <div class="widget-form__actions">
-          <button type="submit" class="btn btn--primary">Generate deck plan</button>
-        </div>
-      </form>
-      <div class="presentation-widget__preview" data-presentation-output aria-live="polite"></div>
+      <div class="widget-app widget-app--split presentation-widget">
+        <section class="widget-app__panel presentation-widget__composer" aria-label="Deck inputs">
+          <div class="widget-app__panel-header">
+            <h3>Deck brief</h3>
+            <span class="presentation-widget__badge">Slides in draft</span>
+          </div>
+          <form class="widget-form" data-presentation-form>
+            <label class="widget-field">
+              <span>Audience</span>
+              <input type="text" name="audience" placeholder="Product leadership" required />
+            </label>
+            <label class="widget-field">
+              <span>Slide notes</span>
+              <textarea name="slides" placeholder="One slide idea per line" required></textarea>
+            </label>
+            <div class="widget-form__actions">
+              <button type="submit" class="btn btn--primary">Generate deck plan</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel presentation-widget__preview-panel" aria-live="polite">
+          <div class="widget-app__panel-header">
+            <h3>Storyboard</h3>
+            <span class="presentation-widget__status" data-presentation-status>Awaiting structure</span>
+          </div>
+          <div class="presentation-widget__preview" data-presentation-output></div>
+        </section>
+      </div>
     `,
   });
   const form = widget.querySelector('[data-presentation-form]');
   const output = widget.querySelector('[data-presentation-output]');
+  const statusEl = widget.querySelector('[data-presentation-status]');
   if (form && output) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -862,6 +1052,9 @@ function createPresentationWidget(record) {
         <ol>${slides.map((slide, index) => `<li><span>Slide ${index + 1}:</span> ${slide}</li>`).join('')}</ol>
         <p class="presentation-widget__hint">Slides render on canvas after integrating the presentation service.</p>
       `;
+      if (statusEl) {
+        statusEl.textContent = `${slides.length} slide${slides.length === 1 ? '' : 's'} drafted`;
+      }
     });
   }
   return widget;
@@ -874,31 +1067,46 @@ function createDataWidget(record) {
     height: 480,
     offset: { left: 340, top: 260 },
     body: `
-      <form class="widget-form" data-data-form>
-        <label class="widget-field">
-          <span>Dataset description</span>
-          <textarea name="dataset" placeholder="Paste rows or describe the KPIs to plot" required></textarea>
-        </label>
-        <label class="widget-field">
-          <span>Chart style</span>
-          <select name="chart">
-            <option value="line">Line</option>
-            <option value="bar">Bar</option>
-            <option value="pie">Pie</option>
-            <option value="scatter">Scatter</option>
-          </select>
-        </label>
-        <div class="widget-form__actions">
-          <button type="submit" class="btn btn--primary">Preview insight</button>
-        </div>
-      </form>
-      <div class="data-widget__preview" data-data-output>
-        <p class="widget__hint">Visualisations will appear here once the data service is connected.</p>
+      <div class="widget-app widget-app--split data-widget">
+        <section class="widget-app__panel data-widget__composer" aria-label="Chart builder">
+          <div class="widget-app__panel-header">
+            <h3>Chart builder</h3>
+            <span class="data-widget__badge">Preview only</span>
+          </div>
+          <form class="widget-form" data-data-form>
+            <label class="widget-field">
+              <span>Dataset description</span>
+              <textarea name="dataset" placeholder="Paste rows or describe the KPIs to plot" required></textarea>
+            </label>
+            <label class="widget-field">
+              <span>Chart style</span>
+              <select name="chart">
+                <option value="line">Line</option>
+                <option value="bar">Bar</option>
+                <option value="pie">Pie</option>
+                <option value="scatter">Scatter</option>
+              </select>
+            </label>
+            <div class="widget-form__actions">
+              <button type="submit" class="btn btn--primary">Preview insight</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel data-widget__preview-panel" aria-live="polite">
+          <div class="widget-app__panel-header">
+            <h3>Visual output</h3>
+            <span class="data-widget__status" data-data-status>Waiting for prompt</span>
+          </div>
+          <div class="data-widget__preview" data-data-output>
+            <p class="widget__hint">Visualisations will appear here once the data service is connected.</p>
+          </div>
+        </section>
       </div>
     `,
   });
   const form = widget.querySelector('[data-data-form]');
   const output = widget.querySelector('[data-data-output]');
+  const statusEl = widget.querySelector('[data-data-status]');
   if (form && output) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -911,6 +1119,9 @@ function createDataWidget(record) {
           <p class="data-widget__summary">${description.slice(0, 140)}…</p>
         </div>
       `;
+      if (statusEl) {
+        statusEl.textContent = `${chart} chart staged`;
+      }
     });
   }
   return widget;
@@ -923,24 +1134,39 @@ function createGameWidget(record) {
     height: 520,
     offset: { left: 260, top: 300 },
     body: `
-      <form class="widget-form" data-game-form>
-        <label class="widget-field">
-          <span>Core fantasy</span>
-          <input type="text" name="fantasy" placeholder="E.g. Design your own solar empire" required />
-        </label>
-        <label class="widget-field">
-          <span>Game loop</span>
-          <textarea name="loop" placeholder="Describe the repeatable actions" required></textarea>
-        </label>
-        <div class="widget-form__actions">
-          <button type="submit" class="btn btn--primary">Prototype concept</button>
-        </div>
-      </form>
-      <div class="game-widget__preview" data-game-output aria-live="polite"></div>
+      <div class="widget-app widget-app--split game-widget">
+        <section class="widget-app__panel game-widget__composer" aria-label="Concept builder">
+          <div class="widget-app__panel-header">
+            <h3>Concept</h3>
+            <span class="game-widget__badge">Prototype sketch</span>
+          </div>
+          <form class="widget-form" data-game-form>
+            <label class="widget-field">
+              <span>Core fantasy</span>
+              <input type="text" name="fantasy" placeholder="E.g. Design your own solar empire" required />
+            </label>
+            <label class="widget-field">
+              <span>Game loop</span>
+              <textarea name="loop" placeholder="Describe the repeatable actions" required></textarea>
+            </label>
+            <div class="widget-form__actions">
+              <button type="submit" class="btn btn--primary">Prototype concept</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel game-widget__preview-panel" aria-live="polite">
+          <div class="widget-app__panel-header">
+            <h3>Playable beats</h3>
+            <span class="game-widget__status" data-game-status>Awaiting concept</span>
+          </div>
+          <div class="game-widget__preview" data-game-output></div>
+        </section>
+      </div>
     `,
   });
   const form = widget.querySelector('[data-game-form]');
   const output = widget.querySelector('[data-game-output]');
+  const statusEl = widget.querySelector('[data-game-status]');
   if (form && output) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -952,6 +1178,9 @@ function createGameWidget(record) {
         <p>${loop}</p>
         <p class="game-widget__hint">Scene blocks and mechanics will materialise here after connecting the game runtime.</p>
       `;
+      if (statusEl) {
+        statusEl.textContent = 'Concept staged';
+      }
     });
   }
   return widget;
@@ -964,28 +1193,43 @@ function createAvatarWidget(record) {
     height: 480,
     offset: { left: 220, top: 340 },
     body: `
-      <form class="widget-form" data-avatar-form>
-        <label class="widget-field">
-          <span>Visual style</span>
-          <select name="style">
-            <option value="cartoon">Cartoon</option>
-            <option value="voxel">Voxel</option>
-            <option value="photorealistic">Photorealistic</option>
-          </select>
-        </label>
-        <label class="widget-field">
-          <span>Persona notes</span>
-          <textarea name="notes" placeholder="Describe personality, outfit, and pose" required></textarea>
-        </label>
-        <div class="widget-form__actions">
-          <button type="submit" class="btn btn--primary">Design avatar</button>
-        </div>
-      </form>
-      <div class="avatar-widget__preview" data-avatar-output aria-live="polite"></div>
+      <div class="widget-app widget-app--split avatar-widget">
+        <section class="widget-app__panel avatar-widget__composer" aria-label="Persona builder">
+          <div class="widget-app__panel-header">
+            <h3>Persona</h3>
+            <span class="avatar-widget__badge">Creative brief</span>
+          </div>
+          <form class="widget-form" data-avatar-form>
+            <label class="widget-field">
+              <span>Visual style</span>
+              <select name="style">
+                <option value="cartoon">Cartoon</option>
+                <option value="voxel">Voxel</option>
+                <option value="photorealistic">Photorealistic</option>
+              </select>
+            </label>
+            <label class="widget-field">
+              <span>Persona notes</span>
+              <textarea name="notes" placeholder="Describe personality, outfit, and pose" required></textarea>
+            </label>
+            <div class="widget-form__actions">
+              <button type="submit" class="btn btn--primary">Design avatar</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel avatar-widget__preview-panel" aria-live="polite">
+          <div class="widget-app__panel-header">
+            <h3>Moodboard</h3>
+            <span class="avatar-widget__status" data-avatar-status>Awaiting brief</span>
+          </div>
+          <div class="avatar-widget__preview" data-avatar-output></div>
+        </section>
+      </div>
     `,
   });
   const form = widget.querySelector('[data-avatar-form]');
   const output = widget.querySelector('[data-avatar-output]');
+  const statusEl = widget.querySelector('[data-avatar-status]');
   if (form && output) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -999,6 +1243,9 @@ function createAvatarWidget(record) {
         </div>
         <p class="avatar-widget__hint">Preview image will display once the avatar pipeline is wired up.</p>
       `;
+      if (statusEl) {
+        statusEl.textContent = `${style} persona drafted`;
+      }
     });
   }
   return widget;
@@ -1011,26 +1258,41 @@ function createSimulationWidget(record) {
     height: 460,
     offset: { left: 420, top: 320 },
     body: `
-      <form class="widget-form" data-simulation-form>
-        <label class="widget-field">
-          <span>Scenario</span>
-          <input type="text" name="scenario" placeholder="Launch day traffic surge" required />
-        </label>
-        <label class="widget-field">
-          <span>Variables</span>
-          <textarea name="variables" placeholder="List inputs to simulate" required></textarea>
-        </label>
-        <div class="widget-form__actions">
-          <button type="submit" class="btn btn--primary">Run simulation</button>
-        </div>
-      </form>
-      <div class="simulation-widget__output" data-simulation-output>
-        <p class="widget__hint">Model outputs will stream here as soon as the physics service is ready.</p>
+      <div class="widget-app widget-app--split simulation-widget">
+        <section class="widget-app__panel simulation-widget__composer" aria-label="Scenario setup">
+          <div class="widget-app__panel-header">
+            <h3>Scenario setup</h3>
+            <span class="simulation-widget__badge">Preview run</span>
+          </div>
+          <form class="widget-form" data-simulation-form>
+            <label class="widget-field">
+              <span>Scenario</span>
+              <input type="text" name="scenario" placeholder="Launch day traffic surge" required />
+            </label>
+            <label class="widget-field">
+              <span>Variables</span>
+              <textarea name="variables" placeholder="List inputs to simulate" required></textarea>
+            </label>
+            <div class="widget-form__actions">
+              <button type="submit" class="btn btn--primary">Run simulation</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel simulation-widget__preview-panel" aria-live="polite">
+          <div class="widget-app__panel-header">
+            <h3>Projected output</h3>
+            <span class="simulation-widget__status" data-simulation-status>Idle</span>
+          </div>
+          <div class="simulation-widget__output" data-simulation-output>
+            <p class="widget__hint">Model outputs will stream here as soon as the physics service is ready.</p>
+          </div>
+        </section>
       </div>
     `,
   });
   const form = widget.querySelector('[data-simulation-form]');
   const output = widget.querySelector('[data-simulation-output]');
+  const statusEl = widget.querySelector('[data-simulation-status]');
   if (form && output) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -1045,6 +1307,9 @@ function createSimulationWidget(record) {
         <p>Variables in play:</p>
         <ul>${variables.map((item) => `<li>${item}</li>`).join('')}</ul>
       `;
+      if (statusEl) {
+        statusEl.textContent = 'Simulation queued';
+      }
     });
   }
   return widget;
@@ -1057,21 +1322,36 @@ function createWhiteboardWidget(record) {
     height: 500,
     offset: { left: 380, top: 360 },
     body: `
-      <form class="widget-form" data-whiteboard-form>
-        <label class="widget-field">
-          <span>Add sticky note</span>
-          <input type="text" name="note" placeholder="Capture a decision or task" />
-        </label>
-        <div class="widget-form__actions">
-          <button type="submit" class="btn">Add note</button>
-        </div>
-      </form>
-      <ul class="whiteboard-widget__notes" data-whiteboard-list></ul>
-      <p class="widget__hint">Shared cursors and live sync land here next.</p>
+      <div class="widget-app widget-app--split whiteboard-widget">
+        <section class="widget-app__panel whiteboard-widget__composer" aria-label="Add note">
+          <div class="widget-app__panel-header">
+            <h3>New sticky</h3>
+            <span class="whiteboard-widget__badge">Local only</span>
+          </div>
+          <form class="widget-form" data-whiteboard-form>
+            <label class="widget-field">
+              <span>Add sticky note</span>
+              <input type="text" name="note" placeholder="Capture a decision or task" />
+            </label>
+            <div class="widget-form__actions">
+              <button type="submit" class="btn">Add note</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel whiteboard-widget__board" aria-live="polite">
+          <div class="widget-app__panel-header">
+            <h3>Ideas board</h3>
+            <span class="whiteboard-widget__status" data-whiteboard-count>0 notes</span>
+          </div>
+          <ul class="whiteboard-widget__notes" data-whiteboard-list></ul>
+          <p class="widget__hint">Shared cursors and live sync land here next.</p>
+        </section>
+      </div>
     `,
   });
   const form = widget.querySelector('[data-whiteboard-form]');
   const list = widget.querySelector('[data-whiteboard-list]');
+  const countEl = widget.querySelector('[data-whiteboard-count]');
   if (form && list) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -1082,6 +1362,10 @@ function createWhiteboardWidget(record) {
       item.textContent = value;
       list.appendChild(item);
       input.value = '';
+      if (countEl) {
+        const total = list.querySelectorAll('li').length;
+        countEl.textContent = total === 1 ? '1 note' : `${total} notes`;
+      }
     });
   }
   return widget;
@@ -1094,24 +1378,39 @@ function createKnowledgeWidget(record) {
     height: 500,
     offset: { left: 440, top: 380 },
     body: `
-      <form class="widget-form" data-knowledge-form>
-        <label class="widget-field">
-          <span>Title</span>
-          <input type="text" name="title" placeholder="Insight headline" required />
-        </label>
-        <label class="widget-field">
-          <span>Link or context</span>
-          <input type="url" name="url" placeholder="https://" />
-        </label>
-        <div class="widget-form__actions">
-          <button type="submit" class="btn">Pin insight</button>
-        </div>
-      </form>
-      <ol class="knowledge-widget__list" data-knowledge-list></ol>
+      <div class="widget-app widget-app--split knowledge-widget">
+        <section class="widget-app__panel knowledge-widget__composer" aria-label="Add insight">
+          <div class="widget-app__panel-header">
+            <h3>New insight</h3>
+            <span class="knowledge-widget__badge">Pinned locally</span>
+          </div>
+          <form class="widget-form" data-knowledge-form>
+            <label class="widget-field">
+              <span>Title</span>
+              <input type="text" name="title" placeholder="Insight headline" required />
+            </label>
+            <label class="widget-field">
+              <span>Link or context</span>
+              <input type="url" name="url" placeholder="https://" />
+            </label>
+            <div class="widget-form__actions">
+              <button type="submit" class="btn">Pin insight</button>
+            </div>
+          </form>
+        </section>
+        <section class="widget-app__panel knowledge-widget__board" aria-live="polite">
+          <div class="widget-app__panel-header">
+            <h3>Knowledge feed</h3>
+            <span class="knowledge-widget__status" data-knowledge-count>No entries</span>
+          </div>
+          <ol class="knowledge-widget__list" data-knowledge-list></ol>
+        </section>
+      </div>
     `,
   });
   const form = widget.querySelector('[data-knowledge-form]');
   const list = widget.querySelector('[data-knowledge-list]');
+  const countEl = widget.querySelector('[data-knowledge-count]');
   if (form && list) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -1131,16 +1430,20 @@ function createKnowledgeWidget(record) {
       }
       list.appendChild(item);
       form.reset();
+      if (countEl) {
+        const total = list.querySelectorAll('li').length;
+        countEl.textContent = total === 0 ? 'No entries' : `${total} insight${total === 1 ? '' : 's'}`;
+      }
     });
   }
   return widget;
 }
 
 const widgetBlueprints = {
-  image: { title: 'Image generator', width: 420, height: 430, offset: { left: 120, top: 60 } },
-  video: { title: 'Video generator', width: 440, height: 460, offset: { left: 220, top: 120 } },
-  world: { title: '3D world creator', width: 420, height: 400, offset: { left: 260, top: 160 } },
-  agent: { title: 'Agents roster', width: 420, height: 380, offset: { left: 120, top: 200 } },
+  image: { title: 'Image studio', width: 480, height: 520, offset: { left: 120, top: 60 } },
+  video: { title: 'Video lab', width: 560, height: 560, offset: { left: 220, top: 120 } },
+  world: { title: '3D world creator', width: 560, height: 460, offset: { left: 260, top: 160 } },
+  agent: { title: 'Agents roster', width: 520, height: 420, offset: { left: 120, top: 200 } },
   code: { title: 'Code sandbox', width: 540, height: 520, offset: { left: 300, top: 200 } },
   document: { title: 'Document writer', width: 480, height: 500, offset: { left: 360, top: 140 } },
   presentation: { title: 'Presentation builder', width: 500, height: 520, offset: { left: 420, top: 220 } },
@@ -1404,11 +1707,110 @@ function renderGallery() {
   });
 }
 
+function renderImageWidgetGalleries() {
+  const widgets = document.querySelectorAll('[data-widget-type="image"]');
+  const images = state.assets.filter((asset) => asset.asset_type === 'image');
+  widgets.forEach((widget) => {
+    const gallery = widget.querySelector('[data-image-widget-gallery]');
+    const emptyEl = widget.querySelector('[data-image-widget-empty]');
+    if (!gallery) return;
+    gallery.innerHTML = '';
+    const items = images.slice(0, 6);
+    if (!items.length) {
+      if (emptyEl) emptyEl.removeAttribute('hidden');
+      return;
+    }
+    if (emptyEl) emptyEl.setAttribute('hidden', 'hidden');
+    items.forEach((asset) => {
+      const figure = document.createElement('figure');
+      figure.className = 'image-widget__item';
+
+      const img = document.createElement('img');
+      img.src = asset.url;
+      img.alt = asset.title || 'Generated image';
+      img.loading = 'lazy';
+
+      const caption = document.createElement('figcaption');
+      caption.className = 'image-widget__caption';
+
+      const title = document.createElement('strong');
+      title.textContent = asset.title || 'Untitled render';
+
+      const meta = document.createElement('span');
+      meta.textContent = asset.description || 'AI-generated visual';
+
+      caption.appendChild(title);
+      caption.appendChild(meta);
+      figure.appendChild(img);
+      figure.appendChild(caption);
+      gallery.appendChild(figure);
+    });
+  });
+}
+
+function renderVideoWidgetReels() {
+  const widgets = document.querySelectorAll('[data-widget-type="video"]');
+  const videos = state.assets.filter((asset) => asset.asset_type === 'video');
+  widgets.forEach((widget) => {
+    const gallery = widget.querySelector('[data-video-widget-gallery]');
+    const emptyEl = widget.querySelector('[data-video-widget-empty]');
+    if (!gallery) return;
+    gallery.innerHTML = '';
+    const items = videos.slice(0, 4);
+    if (!items.length) {
+      if (emptyEl) emptyEl.removeAttribute('hidden');
+      return;
+    }
+    if (emptyEl) emptyEl.setAttribute('hidden', 'hidden');
+    items.forEach((asset) => {
+      const card = document.createElement('article');
+      card.className = 'video-widget__item';
+
+      const media = document.createElement('video');
+      media.src = asset.url;
+      media.muted = true;
+      media.loop = true;
+      media.playsInline = true;
+      media.setAttribute('playsinline', '');
+      media.preload = 'metadata';
+      media.autoplay = true;
+      const thumbnail = asset.metadata?.thumbnail_url;
+      if (thumbnail) {
+        media.poster = thumbnail;
+      }
+
+      const content = document.createElement('div');
+      content.className = 'video-widget__caption';
+
+      const title = document.createElement('strong');
+      title.textContent = asset.title || 'Storyboard clip';
+
+      const details = document.createElement('span');
+      const duration = asset.metadata?.duration_seconds;
+      const ratio = asset.metadata?.aspect_ratio;
+      const metaParts = [
+        duration ? `${duration}s` : null,
+        ratio ? `AR ${ratio}` : null,
+      ].filter(Boolean);
+      details.textContent = asset.description || metaParts.join(' · ') || 'Preview';
+
+      content.appendChild(title);
+      content.appendChild(details);
+
+      card.appendChild(media);
+      card.appendChild(content);
+      gallery.appendChild(card);
+    });
+  });
+}
+
 async function loadGallery() {
   const assets = await fetchJSON('/api/gallery');
   state.assets = assets;
   syncComposerSelection();
   renderGallery();
+  renderImageWidgetGalleries();
+  renderVideoWidgetReels();
   renderComposerLibrary();
   renderComposerTimeline();
   renderStudioPreview();
@@ -1555,6 +1957,8 @@ async function loadGalleries() {
   syncComposerSelection();
   populateGalleryFilter();
   renderGallery();
+  renderImageWidgetGalleries();
+  renderVideoWidgetReels();
   renderStudioGalleries();
   renderComposerLibrary();
   populateComposerSources();
@@ -1565,8 +1969,23 @@ function renderAgentWidgets() {
   widgets.forEach((widget) => {
     const listEl = widget.querySelector('[data-agent-widget-list]');
     const emptyEl = widget.querySelector('[data-agent-widget-empty]');
+    const countEl = widget.querySelector('[data-agent-widget-count]');
+    const planEl = widget.querySelector('[data-agent-widget-plan]');
+    const statusEl = widget.querySelector('[data-agent-widget-status]');
     if (!listEl) return;
     listEl.innerHTML = '';
+    if (countEl) {
+      const total = state.agents.length;
+      countEl.textContent = total.toString();
+    }
+    if (planEl) {
+      planEl.textContent = state.agentPlan ? '1' : '0';
+    }
+    if (statusEl) {
+      statusEl.textContent = state.agents.length
+        ? 'Monitoring automation teammates in real time.'
+        : 'Launch your first automation teammate to see activity here.';
+    }
     if (!state.agents.length) {
       if (emptyEl) emptyEl.removeAttribute('hidden');
       return;
