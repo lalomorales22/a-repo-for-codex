@@ -75,6 +75,9 @@ const audioCountEl = document.getElementById('audio-count');
 
 let widgetZIndex = 10;
 let pointerInteraction = null;
+let zoomHoldTimeout = null;
+let zoomHoldInterval = null;
+let zoomHoldButton = null;
 
 const studioEl = document.getElementById('studio');
 const studioToggleBtn = document.getElementById('studio-toggle');
@@ -2845,7 +2848,7 @@ function initialiseStudioNavigation() {
 }
 
 function setCanvasScale(scale) {
-  const bounded = Math.min(2, Math.max(0.5, scale));
+  const bounded = Math.min(2.5, Math.max(0.2, scale));
   state.canvasScale = bounded;
   if (canvasContentEl) {
     canvasContentEl.style.transform = `scale(${bounded})`;
@@ -2855,22 +2858,122 @@ function setCanvasScale(scale) {
   }
 }
 
-function handleZoomButton(event) {
-  const action = event.currentTarget.dataset.zoom;
+function adjustCanvasScale(action, factorOverride) {
   if (action === 'in') {
-    setCanvasScale(state.canvasScale * 1.1);
+    const factor = factorOverride ?? 1.1;
+    setCanvasScale(state.canvasScale * factor);
   } else if (action === 'out') {
-    setCanvasScale(state.canvasScale * 0.9);
+    const factor = factorOverride ?? 0.9;
+    setCanvasScale(state.canvasScale * factor);
   } else if (action === 'reset') {
     setCanvasScale(1);
   }
 }
 
+function startZoomHold(button) {
+  const action = button.dataset.zoom;
+  if (!action || (action !== 'in' && action !== 'out')) {
+    return;
+  }
+  stopZoomHold();
+  zoomHoldButton = button;
+  zoomHoldTimeout = window.setTimeout(() => {
+    zoomHoldTimeout = null;
+    const factor = action === 'in' ? 1.03 : 0.97;
+    zoomHoldInterval = window.setInterval(() => {
+      adjustCanvasScale(action, factor);
+    }, 60);
+  }, 200);
+}
+
+function stopZoomHold({ shouldSkipClick = false } = {}) {
+  const button = zoomHoldButton;
+  if (zoomHoldTimeout) {
+    window.clearTimeout(zoomHoldTimeout);
+    zoomHoldTimeout = null;
+  }
+  if (zoomHoldInterval) {
+    window.clearInterval(zoomHoldInterval);
+    zoomHoldInterval = null;
+  }
+  if (button) {
+    if (shouldSkipClick) {
+      button.dataset.skipClick = 'true';
+      window.setTimeout(() => {
+        if (button.dataset.skipClick === 'true') {
+          delete button.dataset.skipClick;
+        }
+      }, 0);
+    }
+    zoomHoldButton = null;
+  }
+}
+
+function handleZoomButton(event) {
+  const button = event.currentTarget;
+  if (button.dataset.skipClick === 'true') {
+    delete button.dataset.skipClick;
+    return;
+  }
+  const action = button.dataset.zoom;
+  adjustCanvasScale(action);
+}
+
+function handleZoomButtonPointerDown(event) {
+  if (event.button !== 0) return;
+  startZoomHold(event.currentTarget);
+}
+
+function handleZoomButtonPointerUp(event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  const shouldSkipClick = Boolean(zoomHoldInterval);
+  stopZoomHold({ shouldSkipClick });
+}
+
+function handleZoomButtonPointerLeave(event) {
+  if (!zoomHoldButton) return;
+  const shouldSkipClick = event.buttons === 1 && Boolean(zoomHoldInterval);
+  stopZoomHold({ shouldSkipClick });
+}
+
+function handleZoomButtonPointerCancel() {
+  if (!zoomHoldButton) return;
+  const shouldSkipClick = Boolean(zoomHoldInterval);
+  stopZoomHold({ shouldSkipClick });
+}
+
+function handleWindowPointerUp() {
+  if (!zoomHoldButton) return;
+  const shouldSkipClick = Boolean(zoomHoldInterval);
+  stopZoomHold({ shouldSkipClick });
+}
+
 function handleCanvasWheel(event) {
-  if (!canvasWrapperEl) return;
-  event.preventDefault();
-  const direction = event.deltaY > 0 ? 0.97 : 1.03;
-  setCanvasScale(state.canvasScale * direction);
+  if (!canvasEl) return;
+  if (event.ctrlKey || event.metaKey) {
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? 0.95 : 1.05;
+    setCanvasScale(state.canvasScale * direction);
+    return;
+  }
+
+  const target = canvasEl;
+
+  if (event.shiftKey && event.deltaY !== 0 && Math.abs(event.deltaX) < Math.abs(event.deltaY)) {
+    event.preventDefault();
+    target.scrollLeft += event.deltaY;
+    return;
+  }
+
+  if (event.deltaX !== 0 || event.deltaY !== 0) {
+    event.preventDefault();
+    if (event.deltaX !== 0) {
+      target.scrollLeft += event.deltaX;
+    }
+    if (event.deltaY !== 0) {
+      target.scrollTop += event.deltaY;
+    }
+  }
 }
 
 function setDropdownOpen(isOpen) {
@@ -3206,6 +3309,10 @@ if (composerClearBtn) {
 
 zoomButtons.forEach((button) => {
   button.addEventListener('click', handleZoomButton);
+  button.addEventListener('pointerdown', handleZoomButtonPointerDown);
+  button.addEventListener('pointerup', handleZoomButtonPointerUp);
+  button.addEventListener('pointerleave', handleZoomButtonPointerLeave);
+  button.addEventListener('pointercancel', handleZoomButtonPointerCancel);
 });
 
 if (addWidgetBtn) {
@@ -3227,6 +3334,8 @@ if (canvasWrapperEl) {
 
 window.addEventListener('pointermove', handlePointerMove);
 window.addEventListener('pointerup', handlePointerUp);
+window.addEventListener('pointerup', handleWindowPointerUp);
+window.addEventListener('pointercancel', handleWindowPointerUp);
 
 document.addEventListener('click', handleDocumentClick);
 
