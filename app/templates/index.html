@@ -42,6 +42,7 @@
             <button class="dropdown__item" data-widget-type="knowledge" type="button">Knowledge board</button>
           </div>
         </div>
+        <button id="data-toggle" class="btn btn--ghost" type="button">Data</button>
         <button id="agents-toggle" class="btn btn--ghost" type="button">Agents</button>
         <button id="audio-toggle" class="btn btn--ghost" type="button">Audio</button>
         <button id="studio-toggle" class="btn btn--ghost" type="button">
@@ -434,6 +435,30 @@
             </section>
             <section class="agents__detail" id="agent-detail" aria-live="polite"></section>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="data" class="data" aria-hidden="true">
+      <div class="data__surface">
+        <header class="data__header">
+          <div>
+            <p class="data__eyebrow">Mega ultimate gallery</p>
+            <h2>Data backend</h2>
+            <p>
+              Every artifact created across the app lives here—audio, agents, visuals, video,
+              software widgets, and the conversations that inspired them.
+            </p>
+          </div>
+          <button id="data-close" class="btn" type="button">Close</button>
+        </header>
+        <div class="data__body">
+          <aside class="data__sidebar" aria-label="Inventory overview">
+            <h3>Inventory totals</h3>
+            <ul id="data-summary" class="data-summary"></ul>
+            <p id="data-status" class="data__status" role="status" aria-live="polite"></p>
+          </aside>
+          <div id="data-catalog" class="data__catalog" aria-live="polite"></div>
         </div>
       </div>
     </section>

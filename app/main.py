@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 
 from .config import BASE_DIR, get_settings
 from .database import (
@@ -31,17 +32,24 @@ from .schemas import (
     AgentCreate,
     AgentPlan,
     AgentRead,
+    AgentSummary,
     AgentUpdate,
     AudioGenerationRequest,
     AudioTrackRead,
+    AudioTrackSummary,
     ConversationCreate,
     ConversationRead,
+    ConversationSummary,
     ConversationUpdate,
+    DataCatalogResponse,
+    DataCatalogStats,
     GalleryAssetAssignment,
     GalleryAssetCreate,
     GalleryAssetRead,
+    GalleryAssetSummary,
     GalleryCreate,
     GalleryRead,
+    GallerySummary,
     GalleryUpdate,
     ImageRequest,
     ImageResponse,
@@ -54,6 +62,7 @@ from .schemas import (
     VideoResponse,
     WorkspaceWidgetCreate,
     WorkspaceWidgetRead,
+    WorkspaceWidgetSummary,
     WorkspaceWidgetUpdate,
 )
 
@@ -535,3 +544,145 @@ def generate_audio_track(payload: AudioGenerationRequest, db=Depends(get_db)):
     db.flush()
     db.refresh(track)
     return AudioTrackRead.model_validate(track)
+
+
+@app.get("/api/data-catalog", response_model=DataCatalogResponse)
+def get_data_catalog(db=Depends(get_db)):
+    stats = DataCatalogStats(
+        conversations=db.query(func.count(Conversation.id)).scalar() or 0,
+        messages=db.query(func.count(Message.id)).scalar() or 0,
+        gallery_assets=db.query(func.count(GalleryAsset.id)).scalar() or 0,
+        galleries=db.query(func.count(Gallery.id)).scalar() or 0,
+        agents=db.query(func.count(Agent.id)).scalar() or 0,
+        audio_tracks=db.query(func.count(AudioTrack.id)).scalar() or 0,
+        widgets=db.query(func.count(WorkspaceWidget.id)).scalar() or 0,
+    )
+
+    limit = 6
+
+    conversation_rows = (
+        db.query(
+            Conversation.id,
+            Conversation.title,
+            Conversation.updated_at,
+            func.count(Message.id).label("message_count"),
+        )
+        .outerjoin(Message)
+        .group_by(Conversation.id)
+        .order_by(Conversation.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    conversations = [
+        ConversationSummary(
+            id=row.id,
+            title=row.title,
+            message_count=row.message_count or 0,
+            updated_at=row.updated_at,
+        )
+        for row in conversation_rows
+    ]
+
+    assets = (
+        db.query(GalleryAsset)
+        .order_by(GalleryAsset.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    asset_summaries = [
+        GalleryAssetSummary(
+            id=asset.id,
+            asset_type=asset.asset_type,
+            title=asset.title,
+            description=asset.description,
+            url=asset.url,
+            created_at=asset.created_at,
+        )
+        for asset in assets
+    ]
+
+    tracks = (
+        db.query(AudioTrack)
+        .order_by(AudioTrack.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    audio_summaries = [
+        AudioTrackSummary(
+            id=track.id,
+            title=track.title,
+            description=track.description,
+            style=track.style,
+            duration_seconds=track.duration_seconds,
+            voice=track.voice,
+            track_type=track.track_type,
+            url=track.url,
+            created_at=track.created_at,
+        )
+        for track in tracks
+    ]
+
+    agent_records = (
+        db.query(Agent)
+        .order_by(Agent.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    agent_summaries = [
+        AgentSummary(
+            id=agent.id,
+            name=agent.name,
+            mission=agent.mission,
+            capabilities=agent.capabilities,
+            updated_at=agent.updated_at,
+        )
+        for agent in agent_records
+    ]
+
+    gallery_records = (
+        db.query(Gallery)
+        .order_by(Gallery.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    gallery_summaries = [
+        GallerySummary(
+            id=gallery.id,
+            name=gallery.name,
+            description=gallery.description,
+            category=gallery.category,
+            asset_count=gallery.asset_count,
+            updated_at=gallery.updated_at,
+        )
+        for gallery in gallery_records
+    ]
+
+    widget_records = (
+        db.query(WorkspaceWidget)
+        .order_by(WorkspaceWidget.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    widget_summaries = [
+        WorkspaceWidgetSummary(
+            id=widget.id,
+            title=widget.title,
+            widget_type=widget.widget_type,
+            width=widget.width,
+            height=widget.height,
+            config=widget.config,
+            created_at=widget.created_at,
+            updated_at=widget.updated_at,
+        )
+        for widget in widget_records
+    ]
+
+    return DataCatalogResponse(
+        stats=stats,
+        conversations=conversations,
+        assets=asset_summaries,
+        audio=audio_summaries,
+        agents=agent_summaries,
+        galleries=gallery_summaries,
+        widgets=widget_summaries,
+    )
