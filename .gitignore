@@ -4,3 +4,16 @@ mega_app.db
 .env
 venv/
 .gitignore
+TESTING_GUIDE.md
+test_sora_api.py
+.gitignore
+SORA_API_SUCCESS.md
+CHANGELOG.md
+API_IMPLEMENTATION_SUMMARY.md
+FIXES.md
+test_video_quick.py
+BEFORE_AFTER_COMPARISON.md
+.gitignore
+SUCCESS_SUMMARY.md
+update_video_urls.py
+VIDEO_PROXY_FIX.md

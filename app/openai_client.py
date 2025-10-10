@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from typing import Any, Iterable
 
+import httpx
 from openai import OpenAI, OpenAIError
 
 from .config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def _format_history(history: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
@@ -82,7 +87,7 @@ class OpenAIMegaClient:
         }
 
     def create_image(self, prompt: str, *, size: str, quality: str) -> dict[str, Any]:
-        """Generate an image using the Images API."""
+        """Generate an image using the Images API with gpt-image-1."""
 
         if self._client is None:
             return {
@@ -91,9 +96,39 @@ class OpenAIMegaClient:
                 "model": "gpt-image-1",
             }
 
+        # gpt-image-1 supports: 1024x1024, 1536x1024 (landscape), 1024x1536 (portrait), or auto
+        # Map common sizes to gpt-image-1 supported sizes
+        size_mapping = {
+            "256x256": "1024x1024",
+            "512x512": "1024x1024",
+            "1024x1024": "1024x1024",
+            "1536x1024": "1536x1024",
+            "1024x1536": "1024x1536",
+            "1792x1024": "1536x1024",  # Map to closest supported size
+            "1024x1792": "1024x1536",  # Map to closest supported size
+        }
+        
+        gpt_image_size = size_mapping.get(size, "auto")
+        
+        # gpt-image-1 supports: high, medium, low, or auto
+        quality_mapping = {
+            "high": "high",
+            "hd": "high",
+            "medium": "medium",
+            "standard": "medium",
+            "low": "low",
+        }
+        gpt_image_quality = quality_mapping.get(quality, "auto")
+
         try:
+            # Use gpt-image-1 which returns base64-encoded images
             result = self._client.images.generate(
-                model="gpt-image-1", prompt=prompt, size=size, quality=quality
+                model="gpt-image-1",
+                prompt=prompt,
+                size=gpt_image_size,
+                quality=gpt_image_quality,
+                n=1,
+                output_format="png",
             )
         except OpenAIError as exc:  # pragma: no cover - best effort guard
             return {
@@ -103,8 +138,15 @@ class OpenAIMegaClient:
             }
 
         data = result.data[0]
+        # gpt-image-1 returns b64_json, convert to data URL
+        if hasattr(data, "b64_json") and data.b64_json:
+            image_url = f"data:image/png;base64,{data.b64_json}"
+        else:
+            # Fallback to url if available
+            image_url = getattr(data, "url", "https://placehold.co/600x600?text=No+Image+Data")
+        
         return {
-            "url": data.url,
+            "url": image_url,
             "revised_prompt": getattr(data, "revised_prompt", prompt),
             "model": "gpt-image-1",
         }
@@ -112,7 +154,13 @@ class OpenAIMegaClient:
     def create_video(
         self, prompt: str, *, aspect_ratio: str, duration_seconds: int, quality: str
     ) -> dict[str, Any]:
-        """Generate a video storyboard or clip placeholder."""
+        """Generate a video using the OpenAI Sora video generation API.
+        
+        This uses the real /videos endpoint which is an asynchronous process:
+        1. POST /videos to start a render job
+        2. GET /videos/{video_id} to poll for completion status
+        3. GET /videos/{video_id}/content to fetch the final MP4
+        """
 
         if self._client is None:
             orientation = "vertical" if aspect_ratio in {"9:16", "3:4"} else "landscape"
@@ -120,7 +168,7 @@ class OpenAIMegaClient:
             return {
                 "url": "https://samplelib.com/lib/preview/mp4/sample-5s.mp4",
                 "thumbnail_url": f"https://placehold.co/640x360?text={placeholder_text or 'Preview'}",
-                "model": "gpt-video-1",  # indicative placeholder
+                "model": "video-placeholder",
                 "orientation": orientation,
                 "aspect_ratio": aspect_ratio,
                 "duration_seconds": duration_seconds,
@@ -128,59 +176,132 @@ class OpenAIMegaClient:
                 "revised_prompt": prompt,
             }
 
-        # Until the official video endpoint is widely available, fall back to a storyboard
-        # using the responses API to synthesize a creative brief. The resulting asset is still
-        # treated as a video artifact on the frontend.
+        # Map aspect ratio to video size (sora-2 supports various sizes)
+        size_mapping = {
+            "16:9": "1280x720",    # landscape
+            "9:16": "720x1280",    # portrait
+            "1:1": "1024x1024",    # square
+            "4:3": "1024x768",     # standard
+            "3:4": "768x1024",     # portrait standard
+        }
+        video_size = size_mapping.get(aspect_ratio, "1280x720")
+        
+        # Sora-2 only supports specific durations: 4, 8, or 12 seconds
+        # Map the requested duration to the nearest supported value
+        if duration_seconds <= 4:
+            video_seconds = "4"
+        elif duration_seconds <= 8:
+            video_seconds = "8"
+        else:
+            video_seconds = "12"
+
         try:
-            response = self._client.responses.create(
-                model="gpt-5-chat-latest",
-                input=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": (
-                                    "Create a cinematic storyboard synopsis for a short video "
-                                    f"({duration_seconds}s, {aspect_ratio} ratio, {quality} quality) "
-                                    f"with the following prompt: {prompt}"
-                                ),
-                            }
-                        ],
-                    }
-                ],
+            # Start a video render job using the Videos API
+            
+            headers = {
+                "Authorization": f"Bearer {self._settings.openai_api_key}",
+                "Content-Type": "application/json",
+            }
+            
+            # Start the render job with JSON payload
+            response = httpx.post(
+                "https://api.openai.com/v1/videos",
+                headers=headers,
+                json={
+                    "prompt": prompt,
+                    "model": "sora-2",
+                    "size": video_size,
+                    "seconds": video_seconds,
+                },
+                timeout=30.0,
             )
-        except OpenAIError as exc:  # pragma: no cover - defensive guard
+            response.raise_for_status()
+            job_data = response.json()
+            
+            video_id = job_data.get("id")
+            if not video_id:
+                raise ValueError("No video ID returned from API")
+            
+            # Poll for completion (with timeout)
+            max_attempts = 60  # 60 attempts = ~5 minutes with 5s intervals
+            attempt = 0
+            
+            while attempt < max_attempts:
+                status_response = httpx.get(
+                    f"https://api.openai.com/v1/videos/{video_id}",
+                    headers=headers,
+                    timeout=30.0,
+                )
+                status_response.raise_for_status()
+                status_data = status_response.json()
+                
+                status = status_data.get("status")
+                
+                if status == "completed":
+                    # Fetch the final video content URL
+                    content_url = f"https://api.openai.com/v1/videos/{video_id}/content"
+                    
+                    orientation = "vertical" if aspect_ratio in {"9:16", "3:4"} else "landscape"
+                    
+                    return {
+                        "url": content_url,
+                        "thumbnail_url": status_data.get("thumbnail_url", "https://placehold.co/640x360?text=Video+Ready"),
+                        "model": "sora-2",
+                        "orientation": orientation,
+                        "aspect_ratio": aspect_ratio,
+                        "duration_seconds": int(video_seconds),  # Convert back to int
+                        "quality": quality,
+                        "revised_prompt": status_data.get("revised_prompt", prompt),
+                        "video_id": video_id,
+                    }
+                elif status == "failed":
+                    error_msg = status_data.get("error", "Unknown error")
+                    raise ValueError(f"Video generation failed: {error_msg}")
+                
+                # Still processing, wait before polling again
+                time.sleep(5)
+                attempt += 1
+            
+            # Timeout - return partial result
+            orientation = "vertical" if aspect_ratio in {"9:16", "3:4"} else "landscape"
+            return {
+                "url": f"https://api.openai.com/v1/videos/{video_id}/content",
+                "thumbnail_url": "https://placehold.co/640x360?text=Processing",
+                "model": "sora-2",
+                "orientation": orientation,
+                "aspect_ratio": aspect_ratio,
+                "duration_seconds": int(video_seconds),  # Convert back to int
+                "quality": quality,
+                "revised_prompt": prompt,
+                "video_id": video_id,
+                "status": "processing",
+            }
+            
+        except Exception as exc:  # pragma: no cover - defensive guard
+            # Log the actual error for debugging
+            logger.error(f"Video generation failed: {type(exc).__name__}: {exc}")
+            
+            orientation = "vertical" if aspect_ratio in {"9:16", "3:4"} else "landscape"
+            
+            # Check if it's an HTTP error with status code
+            error_detail = str(exc)
+            if hasattr(exc, 'response'):
+                try:
+                    error_detail = f"HTTP {exc.response.status_code}: {exc.response.text[:200]}"
+                except:
+                    pass
+            
             return {
                 "url": "https://samplelib.com/lib/preview/mp4/sample-5s.mp4",
-                "thumbnail_url": "https://placehold.co/640x360?text=Video+Error",
-                "model": "gpt-video-1",
-                "orientation": "landscape",
+                "thumbnail_url": f"https://placehold.co/640x360?text=API+Error",
+                "model": "sora-2-fallback",
+                "orientation": orientation,
                 "aspect_ratio": aspect_ratio,
-                "duration_seconds": duration_seconds,
+                "duration_seconds": int(video_seconds) if isinstance(video_seconds, str) else duration_seconds,
                 "quality": quality,
-                "revised_prompt": f"{prompt} (error: {exc})",
+                "revised_prompt": f"{prompt} (API Error: {error_detail})",
+                "error": error_detail,
             }
-
-        if getattr(response, "output", None):
-            storyboard = response.output[0].content[0].text
-        else:
-            storyboard_text = getattr(response, "output_text", "")
-            if isinstance(storyboard_text, list):
-                storyboard = "".join(storyboard_text) or prompt
-            else:
-                storyboard = storyboard_text or prompt
-        orientation = "vertical" if aspect_ratio in {"9:16", "3:4"} else "landscape"
-        return {
-            "url": "https://samplelib.com/lib/preview/mp4/sample-5s.mp4",
-            "thumbnail_url": "https://placehold.co/640x360?text=AI+Storyboard",
-            "model": response.model,
-            "orientation": orientation,
-            "aspect_ratio": aspect_ratio,
-            "duration_seconds": duration_seconds,
-            "quality": quality,
-            "revised_prompt": storyboard,
-        }
 
     def plan_agent(self, prompt: str) -> dict[str, Any]:
         """Create an agent blueprint by prompting the Responses API."""

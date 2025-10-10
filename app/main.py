@@ -6,8 +6,9 @@ from typing import Generator
 
 import json
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
@@ -261,15 +262,26 @@ def generate_video(request: VideoRequest, db=Depends(get_db)):
         quality=request.quality,
     )
 
+    # Extract video_id from the OpenAI URL if available
+    video_id = video_info.get("video_id")
+    
+    # If we have a video_id, use our proxy endpoint instead of direct OpenAI URL
+    if video_id:
+        video_url = f"/api/videos/{video_id}/content"
+    else:
+        # Fallback to the original URL (for mock data or errors)
+        video_url = video_info["url"]
+
     asset = GalleryAsset(
         asset_type="video",
         title=request.prompt[:80] if request.prompt else "Generated video",
         description=(
             f"Storyboard with {video_info['model']} ({request.aspect_ratio}, {request.duration_seconds}s)"
         ),
-        url=video_info["url"],
+        url=video_url,
         metadata_json=json.dumps(
             {
+                "video_id": video_id,
                 "revised_prompt": video_info.get("revised_prompt"),
                 "thumbnail_url": video_info.get("thumbnail_url"),
                 "aspect_ratio": video_info.get("aspect_ratio"),
@@ -284,6 +296,58 @@ def generate_video(request: VideoRequest, db=Depends(get_db)):
     db.refresh(asset)
 
     return VideoResponse(asset=GalleryAssetRead.model_validate(asset))
+
+
+@app.get("/api/videos/{video_id}/content")
+async def proxy_video_content(video_id: str):
+    """
+    Proxy endpoint to fetch video content from OpenAI with authentication.
+    
+    The frontend cannot directly access OpenAI's /videos/{id}/content endpoint
+    because it requires an API key. This endpoint fetches the video with proper
+    authentication and streams it to the client.
+    """
+    if not settings.openai_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="OpenAI API key not configured"
+        )
+    
+    try:
+        # Fetch the video from OpenAI with authentication
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(
+                f"https://api.openai.com/v1/videos/{video_id}/content",
+                headers={
+                    "Authorization": f"Bearer {settings.openai_api_key}",
+                },
+            )
+            
+            if response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Video not found")
+            elif response.status_code == 401:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            elif response.status_code != 200:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to fetch video: {response.text[:200]}"
+                )
+            
+            # Stream the video content to the client
+            return StreamingResponse(
+                response.iter_bytes(chunk_size=8192),
+                media_type=response.headers.get("content-type", "video/mp4"),
+                headers={
+                    "Content-Disposition": f'inline; filename="video_{video_id}.mp4"',
+                    "Accept-Ranges": "bytes",
+                }
+            )
+    
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching video: {str(e)}"
+        )
 
 
 @app.get("/api/widgets", response_model=list[WorkspaceWidgetRead])

@@ -65,13 +65,35 @@ class GalleryAssetRead(BaseModel):
 
     class Config:
         from_attributes = True
+        # Exclude SQLAlchemy's metadata attribute to avoid conflicts
+        ignored_types = (type,)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _extract_from_orm(cls, data: Any) -> Any:
+        """Extract data from ORM model, avoiding SQLAlchemy's metadata attribute."""
+        if hasattr(data, '__dict__'):
+            # It's an ORM object, manually extract the fields we need
+            extracted = {
+                'id': data.id,
+                'asset_type': data.asset_type,
+                'title': data.title,
+                'description': data.description,
+                'url': data.url,
+                'metadata_json': data.metadata_json,
+                'gallery_ids': data.gallery_ids,
+                'created_at': data.created_at,
+            }
+            return extracted
+        return data
 
     @model_validator(mode="after")
     def _populate_metadata(self) -> "GalleryAssetRead":
+        # Parse metadata_json into metadata dict
         if self.metadata is None and self.metadata_json:
             try:
                 self.metadata = json.loads(self.metadata_json)
-            except ValueError:
+            except (ValueError, TypeError):
                 self.metadata = None
         return self
 
@@ -252,13 +274,37 @@ class AudioTrackRead(BaseModel):
 
     class Config:
         from_attributes = True
+        # Exclude SQLAlchemy's metadata attribute to avoid conflicts
+        ignored_types = (type,)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _extract_from_orm(cls, data: Any) -> Any:
+        """Extract data from ORM model, avoiding SQLAlchemy's metadata attribute."""
+        if hasattr(data, '__dict__'):
+            # It's an ORM object, manually extract the fields we need
+            extracted = {
+                'id': data.id,
+                'title': data.title,
+                'description': data.description,
+                'style': data.style,
+                'duration_seconds': data.duration_seconds,
+                'voice': data.voice,
+                'track_type': data.track_type,
+                'url': data.url,
+                'created_at': data.created_at,
+                'metadata_json': data.metadata_json,
+            }
+            return extracted
+        return data
 
     @model_validator(mode="after")
     def _populate_metadata(self) -> "AudioTrackRead":
+        # Parse metadata_json into metadata dict
         if self.metadata is None and self.metadata_json:
             try:
                 self.metadata = json.loads(self.metadata_json)
-            except ValueError:
+            except (ValueError, TypeError):
                 self.metadata = None
         return self
 
