@@ -179,7 +179,10 @@ function renderConversations() {
     titleInput.className = 'conversation-list__title-input';
     titleInput.value = conversation.title;
     titleInput.readOnly = true;
-    titleInput.addEventListener('click', () => openConversationWidget(conversation.id));
+    titleInput.addEventListener('click', () => {
+      console.log('Conversation clicked:', conversation.id, conversation.title);
+      openConversationWidget(conversation.id);
+    });
     
     // Double-click to edit
     titleInput.addEventListener('dblclick', (event) => {
@@ -288,6 +291,7 @@ async function selectConversation(conversationId) {
 }
 
 async function createConversation() {
+  console.log('createConversation called');
   // Create with default name, user can edit inline
   const timestamp = new Date().toLocaleString('en-US', { 
     month: 'short', 
@@ -296,16 +300,19 @@ async function createConversation() {
     minute: '2-digit' 
   });
   const title = `New conversation (${timestamp})`;
+  console.log('Creating conversation with title:', title);
   
   const conversation = await fetchJSON('/api/conversations', {
     method: 'POST',
     body: JSON.stringify({ title }),
   });
+  console.log('Conversation created:', conversation);
   state.conversations.unshift(conversation);
   renderConversations();
   await selectConversation(conversation.id);
   
   // Open the conversation in its own widget
+  console.log('Opening conversation widget...');
   openConversationWidget(conversation.id);
 }
 
@@ -425,17 +432,25 @@ function buildWidgetShell(type, record, options) {
 }
 
 async function openConversationWidget(conversationId) {
+  console.log('openConversationWidget called with ID:', conversationId);
   const conversation = state.conversations.find((c) => c.id === conversationId);
-  if (!conversation) return;
+  if (!conversation) {
+    console.error('Conversation not found:', conversationId);
+    return;
+  }
+  console.log('Found conversation:', conversation);
   
   // Check if widget already exists for this conversation
   const existingWidget = document.getElementById(`widget-conversation-${conversationId}`);
   if (existingWidget) {
+    console.log('Widget already exists, focusing:', existingWidget.id);
     existingWidget.classList.remove('is-minimized');
     existingWidget.hidden = false;
     focusWidget(existingWidget);
     return existingWidget;
   }
+  
+  console.log('Creating new widget for conversation:', conversationId);
   
   // Load messages for this conversation
   await selectConversation(conversationId);
@@ -483,7 +498,9 @@ async function openConversationWidget(conversationId) {
     <div class="widget__resize" data-resize aria-hidden="true"></div>
   `;
   
+  console.log('Mounting widget...');
   mountWidget(widget);
+  console.log('Widget mounted successfully');
   
   // Bind the chat functionality for this specific conversation
   const form = widget.querySelector('[data-conversation-form]');
