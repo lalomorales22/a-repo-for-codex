@@ -172,25 +172,62 @@ function renderConversations() {
     if (conversation.id === state.currentConversationId) {
       li.classList.add('active');
     }
-    const titleButton = document.createElement('button');
-    titleButton.type = 'button';
-    titleButton.className = 'conversation-list__title';
-    titleButton.textContent = conversation.title;
-    titleButton.addEventListener('click', () => selectConversation(conversation.id));
+    
+    // Create editable title element
+    const titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.className = 'conversation-list__title-input';
+    titleInput.value = conversation.title;
+    titleInput.readOnly = true;
+    titleInput.addEventListener('click', () => openConversationWidget(conversation.id));
+    
+    // Double-click to edit
+    titleInput.addEventListener('dblclick', (event) => {
+      event.stopPropagation();
+      titleInput.readOnly = false;
+      titleInput.focus();
+      titleInput.select();
+    });
+    
+    // Save on blur or Enter
+    const saveEdit = async () => {
+      const newTitle = titleInput.value.trim();
+      if (newTitle && newTitle !== conversation.title) {
+        try {
+          const updated = await fetchJSON(`/api/conversations/${conversation.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ title: newTitle }),
+          });
+          if (updated) {
+            conversation.title = newTitle;
+            state.conversations.sort(
+              (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+            );
+          }
+        } catch (error) {
+          console.error(error);
+          titleInput.value = conversation.title; // Revert on error
+        }
+      } else {
+        titleInput.value = conversation.title; // Revert if empty
+      }
+      titleInput.readOnly = true;
+    };
+    
+    titleInput.addEventListener('blur', saveEdit);
+    titleInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        titleInput.blur();
+      } else if (event.key === 'Escape') {
+        titleInput.value = conversation.title;
+        titleInput.readOnly = true;
+        titleInput.blur();
+      }
+    });
 
     const actions = document.createElement('div');
     actions.className = 'conversation-list__actions';
-
-    const editButton = document.createElement('button');
-    editButton.type = 'button';
-    editButton.className = 'conversation-list__btn';
-    editButton.title = 'Rename conversation';
-    editButton.setAttribute('aria-label', `Rename ${conversation.title}`);
-    editButton.textContent = '✎';
-    editButton.addEventListener('click', (event) => {
-      event.stopPropagation();
-      editConversation(conversation.id);
-    });
 
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
@@ -198,14 +235,13 @@ function renderConversations() {
     deleteButton.title = 'Delete conversation';
     deleteButton.setAttribute('aria-label', `Delete ${conversation.title}`);
     deleteButton.textContent = '🗑';
-    deleteButton.addEventListener('click', (event) => {
+    deleteButton.addEventListener('click', async (event) => {
       event.stopPropagation();
-      deleteConversation(conversation.id);
+      await deleteConversation(conversation.id);
     });
 
-    actions.appendChild(editButton);
     actions.appendChild(deleteButton);
-    li.appendChild(titleButton);
+    li.appendChild(titleInput);
     li.appendChild(actions);
     conversationListEl.appendChild(li);
   });
@@ -252,8 +288,15 @@ async function selectConversation(conversationId) {
 }
 
 async function createConversation() {
-  const title = prompt('Name your new conversation', 'Untitled strategy sprint');
-  if (!title) return;
+  // Create with default name, user can edit inline
+  const timestamp = new Date().toLocaleString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit' 
+  });
+  const title = `New conversation (${timestamp})`;
+  
   const conversation = await fetchJSON('/api/conversations', {
     method: 'POST',
     body: JSON.stringify({ title }),
@@ -261,30 +304,15 @@ async function createConversation() {
   state.conversations.unshift(conversation);
   renderConversations();
   await selectConversation(conversation.id);
+  
+  // Open the conversation in its own widget
+  openConversationWidget(conversation.id);
 }
 
+// Inline editing is now handled directly in renderConversations()
+// This function is kept for backwards compatibility but is no longer used
 async function editConversation(conversationId) {
-  const conversation = state.conversations.find((item) => item.id === conversationId);
-  if (!conversation) return;
-  const title = prompt('Rename conversation', conversation.title);
-  if (!title || title.trim() === conversation.title) return;
-  try {
-    const updated = await fetchJSON(`/api/conversations/${conversationId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ title: title.trim() }),
-    });
-    const index = state.conversations.findIndex((item) => item.id === conversationId);
-    if (index !== -1 && updated) {
-      state.conversations[index] = updated;
-      state.conversations.sort(
-        (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-      );
-    }
-    renderConversations();
-  } catch (error) {
-    console.error(error);
-    alert('Unable to rename conversation.');
-  }
+  // No-op - editing is done inline now
 }
 
 async function deleteConversation(conversationId) {
@@ -394,6 +422,139 @@ function buildWidgetShell(type, record, options) {
     registerWidget(record, widget);
   }
   return widget;
+}
+
+async function openConversationWidget(conversationId) {
+  const conversation = state.conversations.find((c) => c.id === conversationId);
+  if (!conversation) return;
+  
+  // Check if widget already exists for this conversation
+  const existingWidget = document.getElementById(`widget-conversation-${conversationId}`);
+  if (existingWidget) {
+    existingWidget.classList.remove('is-minimized');
+    existingWidget.hidden = false;
+    focusWidget(existingWidget);
+    return existingWidget;
+  }
+  
+  // Load messages for this conversation
+  await selectConversation(conversationId);
+  
+  // Create new widget for this conversation
+  const widget = document.createElement('section');
+  widget.id = `widget-conversation-${conversationId}`;
+  widget.dataset.widget = '';
+  widget.dataset.widgetType = 'conversation';
+  widget.dataset.conversationId = conversationId;
+  widget.className = 'widget';
+  
+  const position = nextWidgetPosition();
+  widget.style.width = '520px';
+  widget.style.height = '520px';
+  widget.style.left = `${position.left}px`;
+  widget.style.top = `${position.top}px`;
+  
+  widget.innerHTML = `
+    <header class="widget__header" data-drag-handle>
+      <h2 class="widget__title">${conversation.title}</h2>
+      <div class="widget__toolbar">
+        <button class="widget__icon" data-action="minimize" type="button" aria-label="Minimize">▭</button>
+        <button class="widget__icon" data-action="close" type="button" aria-label="Close">✕</button>
+      </div>
+    </header>
+    <div class="widget__body">
+      <div class="chat-thread" data-conversation-thread></div>
+      <form class="chat-form" data-conversation-form>
+        <textarea
+          data-conversation-input
+          placeholder="Ask anything about your next product milestone..."
+        ></textarea>
+        <div class="chat-form__controls">
+          <select data-conversation-model>
+            <option value="gpt-5-chat-latest" selected>gpt-5-chat-latest</option>
+            <option value="gpt-4.1">gpt-4.1</option>
+            <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+            <option value="o4-mini">o4-mini</option>
+          </select>
+          <button type="submit" class="btn btn--primary">Send</button>
+        </div>
+      </form>
+    </div>
+    <div class="widget__resize" data-resize aria-hidden="true"></div>
+  `;
+  
+  mountWidget(widget);
+  
+  // Bind the chat functionality for this specific conversation
+  const form = widget.querySelector('[data-conversation-form]');
+  const input = widget.querySelector('[data-conversation-input]');
+  const thread = widget.querySelector('[data-conversation-thread]');
+  const modelSelect = widget.querySelector('[data-conversation-model]');
+  
+  // Render existing messages
+  renderMessagesInThread(thread, conversationId);
+  
+  // Handle form submission
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const userMessage = input.value.trim();
+    if (!userMessage) return;
+    
+    input.value = '';
+    input.disabled = true;
+    
+    try {
+      const model = modelSelect.value;
+      const response = await fetchJSON(`/api/conversations/${conversationId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content: userMessage, model }),
+      });
+      
+      // Update state with new messages
+      if (!state.messages[conversationId]) {
+        state.messages[conversationId] = [];
+      }
+      state.messages[conversationId].push(
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content: response.response }
+      );
+      
+      // Re-render messages in this specific thread
+      renderMessagesInThread(thread, conversationId);
+    } catch (error) {
+      console.error(error);
+      alert('Failed to send message.');
+    } finally {
+      input.disabled = false;
+      input.focus();
+    }
+  });
+  
+  return widget;
+}
+
+function renderMessagesInThread(threadEl, conversationId) {
+  if (!threadEl) return;
+  const messages = state.messages[conversationId] || [];
+  threadEl.innerHTML = '';
+  
+  if (!messages.length) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'message message--assistant';
+    placeholder.textContent = 'No messages yet. Ask a question to start the conversation.';
+    threadEl.appendChild(placeholder);
+    return;
+  }
+
+  messages.forEach((message) => {
+    const bubble = document.createElement('div');
+    bubble.classList.add('message');
+    bubble.classList.add(message.role === 'user' ? 'message--user' : 'message--assistant');
+    bubble.innerText = message.content;
+    threadEl.appendChild(bubble);
+  });
+
+  threadEl.scrollTop = threadEl.scrollHeight;
 }
 
 function createChatWidget() {

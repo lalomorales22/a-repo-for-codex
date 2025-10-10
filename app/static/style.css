@@ -1021,6 +1021,31 @@ body {
   font: inherit;
 }
 
+.conversation-list__title-input {
+  flex: 1;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: inherit;
+  text-align: left;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  border-radius: 0.5rem;
+  transition: background 0.2s ease;
+}
+
+.conversation-list__title-input:focus {
+  outline: none;
+  background: rgba(16, 163, 127, 0.15);
+  border: 1px solid var(--accent);
+  cursor: text;
+}
+
+.conversation-list__title-input:not([readonly]):hover {
+  background: rgba(16, 163, 127, 0.08);
+}
+
 .conversation-list__actions {
   display: inline-flex;
   gap: 0.35rem;
