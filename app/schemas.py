@@ -373,6 +373,8 @@ class DataCatalogStats(BaseModel):
     agents: int
     audio_tracks: int
     widgets: int
+    code_projects: int
+    code_files: int
 
 
 class DataCatalogResponse(BaseModel):
@@ -383,3 +385,196 @@ class DataCatalogResponse(BaseModel):
     agents: list[AgentSummary] = Field(default_factory=list)
     galleries: list[GallerySummary] = Field(default_factory=list)
     widgets: list[WorkspaceWidgetSummary] = Field(default_factory=list)
+
+
+class CodeFileBase(BaseModel):
+    path: str = Field(..., min_length=1, max_length=512)
+    language: Optional[str] = Field(default=None, max_length=64)
+
+
+class CodeFileCreate(CodeFileBase):
+    content: str = Field(default="")
+
+
+class CodeFileUpdate(BaseModel):
+    path: Optional[str] = Field(default=None, min_length=1, max_length=512)
+    language: Optional[str] = Field(default=None, max_length=64)
+    content: Optional[str] = None
+
+
+class CodeFileRead(CodeFileBase):
+    id: int
+    project_id: int
+    content: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CodeProjectRead(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    file_count: int = Field(default=0)
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CodeGenerationRequest(BaseModel):
+    prompt: str = Field(..., min_length=1)
+    language: Optional[str] = Field(default=None, max_length=64)
+    context: Optional[str] = None
+    file_path: Optional[str] = Field(default=None, max_length=512)
+
+
+class CodeGenerationResponse(BaseModel):
+    code: str
+    explanation: str
+    model: str
+
+
+class DocumentDraftRequest(BaseModel):
+    topic: str = Field(..., min_length=1)
+    audience: str = Field(..., min_length=1)
+    tone: str = Field(default="pragmatic")
+    key_points: list[str] = Field(default_factory=list)
+
+
+class DocumentSection(BaseModel):
+    heading: str
+    content: str
+
+
+class DocumentDraftResponse(BaseModel):
+    title: str
+    summary: str
+    outline: list[str]
+    sections: list[DocumentSection]
+    call_to_actions: list[str]
+    model: str
+
+
+class PresentationPlanRequest(BaseModel):
+    theme: str = Field(..., min_length=1)
+    audience: str = Field(..., min_length=1)
+    duration_minutes: int = Field(default=15, ge=5, le=120)
+    goals: list[str] = Field(default_factory=list)
+
+
+class PresentationSlide(BaseModel):
+    title: str
+    bullets: list[str]
+    visual: Optional[str] = None
+
+
+class PresentationPlanResponse(BaseModel):
+    headline: str
+    slides: list[PresentationSlide]
+    next_steps: list[str]
+    model: str
+
+
+class DataVisualizationRequest(BaseModel):
+    dataset_description: str = Field(..., min_length=1)
+    chart_preference: str = Field(default="bar")
+    goal: Optional[str] = None
+
+
+class DataPoint(BaseModel):
+    label: str
+    value: float
+
+
+class DataVisualizationResponse(BaseModel):
+    chart_type: str
+    dataset: list[DataPoint]
+    summary: str
+    insights: list[str]
+    model: str
+
+
+class GameConceptRequest(BaseModel):
+    fantasy: str = Field(..., min_length=1)
+    genre: str = Field(default="strategy")
+    pillars: list[str] = Field(default_factory=list)
+    platform: Optional[str] = None
+
+
+class GameConceptResponse(BaseModel):
+    elevator_pitch: str
+    core_loop: list[str]
+    mechanics: list[str]
+    progression: list[str]
+    monetization: list[str]
+    model: str
+
+
+class AvatarDesignRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    style: str = Field(default="illustrated")
+    vibe: Optional[str] = None
+    palette_hint: Optional[str] = None
+
+
+class AvatarDesignResponse(BaseModel):
+    concept_name: str
+    description: str
+    palette: list[str]
+    accessories: list[str]
+    prompt: str
+    model: str
+
+
+class SimulationRunRequest(BaseModel):
+    scenario: str = Field(..., min_length=1)
+    horizon: str = Field(default="30 days")
+    metrics: list[str] = Field(default_factory=list)
+
+
+class SimulationRunResponse(BaseModel):
+    scenario: str
+    timeline: list[dict[str, str]]
+    metrics: list[dict[str, str]]
+    risks: list[str]
+    summary: str
+    model: str
+
+
+class WhiteboardSummaryRequest(BaseModel):
+    notes: list[dict[str, str]]
+
+
+class WhiteboardSummaryResponse(BaseModel):
+    highlights: list[str]
+    clusters: list[dict[str, list[str]]]
+    follow_ups: list[str]
+    model: str
+
+
+class KnowledgeBoardRequest(BaseModel):
+    theme: str = Field(..., min_length=1)
+    objective: str = Field(default="")
+    audience: Optional[str] = None
+
+
+class KnowledgeBoardItem(BaseModel):
+    title: str
+    summary: str
+    link: Optional[str] = None
+
+
+class KnowledgeBoardColumn(BaseModel):
+    title: str
+    items: list[KnowledgeBoardItem]
+
+
+class KnowledgeBoardResponse(BaseModel):
+    theme: str
+    columns: list[KnowledgeBoardColumn]
+    actions: list[str]
+    model: str
