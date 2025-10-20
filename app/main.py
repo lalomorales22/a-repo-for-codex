@@ -637,7 +637,7 @@ def generate_code_suggestion(project_id: int, payload: CodeGenerationRequest, db
             f"""
             {context_line}# Generated {language} snippet responding to: {payload.prompt}
             def main():
-                """Auto-generated placeholder function."""
+                \"\"\"Auto-generated placeholder function.\"\"\"
                 return "Replace with live generation once the AI client is configured."
 
             if __name__ == "__main__":
