@@ -1066,120 +1066,547 @@ function createAgentWidget(record) {
 function createCodeWidget(record) {
   const widget = buildWidgetShell('code', record, {
     title: 'Code sandbox',
-    width: 540,
-    height: 520,
+    width: 640,
+    height: 560,
     offset: { left: 300, top: 200 },
     body: `
-      <div class="widget-app widget-app--split code-widget">
-        <section class="widget-app__panel code-widget__panel" aria-label="Code editor">
-          <div class="widget-app__panel-header">
-            <h3>Editor</h3>
-            <span class="code-widget__environment" data-code-env>Sandbox idle</span>
+      <div class="code-widget code-widget--ide">
+        <aside class="code-widget__sidebar" aria-label="Project explorer">
+          <div class="code-widget__section">
+            <label class="code-widget__label">
+              <span>Project</span>
+              <select class="code-widget__select" data-code-project aria-label="Select project"></select>
+            </label>
           </div>
-          <form class="widget-form code-widget__form" data-code-form>
-            <label class="widget-field">
-              <span>Language</span>
-              <select name="language">
-                <option value="JavaScript">JavaScript</option>
-                <option value="Python">Python</option>
-                <option value="Node">Node</option>
-              </select>
-            </label>
-            <label class="widget-field">
-              <span>Snippet</span>
-              <textarea name="snippet" class="code-widget__editor" placeholder="Write or paste code to simulate…" required></textarea>
-            </label>
-            <div class="widget-form__actions">
-              <button type="submit" class="btn btn--primary">Run sandbox</button>
+          <div class="code-widget__section">
+            <h3>Files</h3>
+            <div class="code-widget__files" data-code-files>
+              <p class="code-widget__empty">Loading files…</p>
             </div>
-          </form>
-        </section>
-        <section class="widget-app__panel code-widget__console" aria-live="polite">
-          <div class="widget-app__panel-header">
-            <h3>Console</h3>
-            <span class="code-widget__hint">Outputs are simulated</span>
           </div>
-          <pre class="code-widget__output" data-code-output>// Awaiting snippet to simulate execution.</pre>
+          <form class="code-widget__new-file" data-code-new-file>
+            <input type="text" name="path" placeholder="folder/new_file.py" required />
+            <select name="language">
+              <option value="python">Python</option>
+              <option value="javascript">JavaScript</option>
+              <option value="markdown">Markdown</option>
+              <option value="text">Plain text</option>
+            </select>
+            <button type="submit" class="btn btn--ghost btn--sm">Add file</button>
+          </form>
+        </aside>
+        <section class="code-widget__workspace" aria-label="Editor workspace">
+          <header class="code-widget__header">
+            <div>
+              <h3 data-code-file-name>Choose a file</h3>
+              <span class="code-widget__status" data-code-status>Workspace initialising</span>
+            </div>
+            <div class="code-widget__header-actions">
+              <label class="code-widget__label">
+                <span>Language</span>
+                <select data-code-language>
+                  <option value="python">Python</option>
+                  <option value="javascript">JavaScript</option>
+                  <option value="markdown">Markdown</option>
+                  <option value="text">Plain text</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn--primary btn--sm" data-code-save disabled>Save file</button>
+            </div>
+          </header>
+          <textarea
+            class="code-widget__editor"
+            data-code-editor
+            placeholder="Select a file to start editing"
+            disabled
+            spellcheck="false"
+          ></textarea>
+          <div class="code-widget__actions">
+            <form class="code-widget__ai-form" data-code-ai-form>
+              <label class="code-widget__label">
+                <span>Ask AI for help</span>
+                <textarea name="prompt" rows="2" placeholder="Generate integration tests…" required></textarea>
+              </label>
+              <div class="code-widget__ai-actions">
+                <button type="submit" class="btn btn--primary btn--sm">Generate</button>
+              </div>
+            </form>
+            <div class="code-widget__ai-meta">
+              <span class="code-widget__environment" data-code-env>Sandbox idle</span>
+              <button type="button" class="btn btn--ghost btn--sm" data-code-apply disabled>Apply suggestion</button>
+            </div>
+          </div>
+          <section class="code-widget__console" aria-live="polite">
+            <header class="code-widget__console-header">
+              <h4>AI console</h4>
+            </header>
+            <pre data-code-output>// Awaiting prompt.</pre>
+          </section>
         </section>
       </div>
     `,
   });
-  const form = widget.querySelector('[data-code-form]');
-  const output = widget.querySelector('[data-code-output]');
+
+  const projectSelect = widget.querySelector('[data-code-project]');
+  const filesContainer = widget.querySelector('[data-code-files]');
+  const newFileForm = widget.querySelector('[data-code-new-file]');
+  const editor = widget.querySelector('[data-code-editor]');
+  const saveButton = widget.querySelector('[data-code-save]');
+  const statusEl = widget.querySelector('[data-code-status]');
+  const fileNameEl = widget.querySelector('[data-code-file-name]');
+  const languageSelect = widget.querySelector('[data-code-language]');
   const envIndicator = widget.querySelector('[data-code-env]');
-  if (form && output) {
-    form.addEventListener('submit', (event) => {
+  const aiForm = widget.querySelector('[data-code-ai-form]');
+  const aiOutput = widget.querySelector('[data-code-output]');
+  const applyButton = widget.querySelector('[data-code-apply]');
+
+  let projects = [];
+  let files = [];
+  let currentProjectId = null;
+  let currentFile = null;
+  let pendingSuggestion = null;
+  let isDirty = false;
+
+  const languageGuess = (path) => {
+    if (!path) return 'text';
+    if (path.endsWith('.py')) return 'python';
+    if (path.endsWith('.js')) return 'javascript';
+    if (path.endsWith('.md')) return 'markdown';
+    return 'text';
+  };
+
+  const setStatus = (text) => {
+    if (statusEl) {
+      statusEl.textContent = text;
+    }
+  };
+
+  const markDirty = () => {
+    if (!currentFile || !saveButton) return;
+    isDirty = true;
+    saveButton.disabled = false;
+    setStatus('Unsaved changes');
+  };
+
+  const clearSuggestion = () => {
+    pendingSuggestion = null;
+    if (applyButton) {
+      applyButton.disabled = true;
+    }
+    if (aiOutput) {
+      aiOutput.textContent = '// Awaiting prompt.';
+    }
+  };
+
+  const renderFileList = () => {
+    if (!filesContainer) return;
+    filesContainer.innerHTML = '';
+    if (!files.length) {
+      const empty = document.createElement('p');
+      empty.className = 'code-widget__empty';
+      empty.textContent = 'No files yet — add one to begin.';
+      filesContainer.appendChild(empty);
+      return;
+    }
+    const list = document.createElement('ul');
+    list.className = 'code-widget__file-list';
+    files.forEach((file) => {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'code-widget__file';
+      button.dataset.fileId = String(file.id);
+      button.textContent = file.path;
+      if (currentFile && currentFile.id === file.id) {
+        button.classList.add('is-active');
+      }
+      button.addEventListener('click', () => selectFile(file.id));
+      item.appendChild(button);
+      list.appendChild(item);
+    });
+    filesContainer.appendChild(list);
+  };
+
+  const selectFile = (fileId) => {
+    const next = files.find((file) => file.id === Number(fileId));
+    if (!next) return;
+    currentFile = { ...next };
+    if (editor) {
+      editor.value = next.content || '';
+      editor.disabled = false;
+      editor.focus();
+    }
+    if (fileNameEl) {
+      fileNameEl.textContent = next.path;
+    }
+    if (languageSelect) {
+      languageSelect.value = next.language || languageGuess(next.path);
+    }
+    if (saveButton) {
+      saveButton.disabled = true;
+    }
+    isDirty = false;
+    setStatus('Viewing saved file');
+    clearSuggestion();
+    renderFileList();
+  };
+
+  const updateFileInState = (updated) => {
+    const index = files.findIndex((file) => file.id === updated.id);
+    if (index >= 0) {
+      files[index] = updated;
+    } else {
+      files.push(updated);
+    }
+  };
+
+  const loadFiles = async (projectId) => {
+    if (!projectId) return;
+    setStatus('Loading files…');
+    try {
+      const response = await fetchJSON(`/api/code/projects/${projectId}/files`);
+      files = response;
+      renderFileList();
+      if (files.length) {
+        const existing = files.find((file) => currentFile && file.id === currentFile.id);
+        selectFile(existing ? existing.id : files[0].id);
+      } else {
+        if (editor) {
+          editor.value = '';
+          editor.disabled = true;
+        }
+        if (fileNameEl) {
+          fileNameEl.textContent = 'Create a file';
+        }
+        clearSuggestion();
+        setStatus('Add a file to begin editing');
+      }
+    } catch (error) {
+      console.error(error);
+      setStatus('Unable to load files');
+    }
+  };
+
+  const renderProjects = (items) => {
+    if (!projectSelect) return;
+    projectSelect.innerHTML = '';
+    items.forEach((project) => {
+      const option = document.createElement('option');
+      option.value = String(project.id);
+      option.textContent = `${project.name} (${project.file_count})`;
+      projectSelect.appendChild(option);
+    });
+    if (!items.length) {
+      const option = document.createElement('option');
+      option.textContent = 'No projects';
+      option.disabled = true;
+      projectSelect.appendChild(option);
+    }
+  };
+
+  const loadProjects = async () => {
+    try {
+      const response = await fetchJSON('/api/code/projects');
+      projects = response;
+      renderProjects(projects);
+      if (projects.length) {
+        if (!currentProjectId) {
+          currentProjectId = projects[0].id;
+        }
+        if (projectSelect) {
+          projectSelect.value = String(currentProjectId);
+        }
+        await loadFiles(currentProjectId);
+        setStatus('Project synced');
+      }
+    } catch (error) {
+      console.error(error);
+      setStatus('Unable to load project');
+    }
+  };
+
+  if (editor) {
+    editor.addEventListener('input', markDirty);
+  }
+  if (languageSelect) {
+    languageSelect.addEventListener('change', markDirty);
+  }
+  if (projectSelect) {
+    projectSelect.addEventListener('change', async (event) => {
+      currentProjectId = Number(event.target.value);
+      await loadFiles(currentProjectId);
+    });
+  }
+  if (newFileForm) {
+    newFileForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const language = form.querySelector('[name="language"]').value;
-      const snippet = form.querySelector('[name="snippet"]').value.trim();
-      if (!snippet) return;
-      output.textContent = `// Simulated ${language} run\n${snippet}\n\n// Results will appear once runtime APIs are wired up.`;
-      if (envIndicator) {
-        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        envIndicator.textContent = `${language} • ${timestamp}`;
+      if (!currentProjectId) return;
+      const formData = new FormData(newFileForm);
+      const path = String(formData.get('path') || '').trim();
+      const language = String(formData.get('language') || 'text');
+      if (!path) return;
+      try {
+        const file = await fetchJSON(`/api/code/projects/${currentProjectId}/files`, {
+          method: 'POST',
+          body: JSON.stringify({ path, language }),
+        });
+        updateFileInState(file);
+        renderFileList();
+        selectFile(file.id);
+        newFileForm.reset();
+        setStatus(`Created ${file.path}`);
+      } catch (error) {
+        console.error(error);
+        alert('Unable to create file. Check server logs for details.');
       }
     });
   }
+  if (saveButton) {
+    saveButton.addEventListener('click', async () => {
+      if (!currentProjectId || !currentFile || !editor) return;
+      try {
+        const payload = {
+          content: editor.value,
+          language: languageSelect ? languageSelect.value : currentFile.language,
+        };
+        const updated = await fetchJSON(
+          `/api/code/projects/${currentProjectId}/files/${currentFile.id}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify(payload),
+          },
+        );
+        updateFileInState(updated);
+        currentFile = { ...updated };
+        if (saveButton) saveButton.disabled = true;
+        isDirty = false;
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setStatus(`Saved • ${timestamp}`);
+        if (envIndicator) {
+          envIndicator.textContent = `Saved ${timestamp}`;
+        }
+        renderFileList();
+      } catch (error) {
+        console.error(error);
+        alert('Unable to save file.');
+      }
+    });
+  }
+  if (aiForm) {
+    aiForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!currentProjectId) {
+        alert('Select a project before requesting code suggestions.');
+        return;
+      }
+      const formData = new FormData(aiForm);
+      const prompt = String(formData.get('prompt') || '').trim();
+      if (!prompt) return;
+      try {
+        setStatus('Generating suggestion…');
+        if (envIndicator) {
+          envIndicator.textContent = 'Generating…';
+        }
+        const response = await fetchJSON(`/api/code/projects/${currentProjectId}/generate`, {
+          method: 'POST',
+          body: JSON.stringify({
+            prompt,
+            language: languageSelect ? languageSelect.value : null,
+            context: editor && editor.value ? editor.value.slice(-2000) : null,
+            file_path: currentFile ? currentFile.path : null,
+          }),
+        });
+        pendingSuggestion = response;
+        if (aiOutput) {
+          aiOutput.textContent = `${response.code || '// No code generated.'}\n\n// ${response.explanation || 'No explanation provided.'}`;
+        }
+        if (applyButton) {
+          applyButton.disabled = !response.code;
+        }
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (envIndicator) {
+          envIndicator.textContent = `${response.model || 'ai'} • ${timestamp}`;
+        }
+        setStatus('Suggestion ready');
+        aiForm.reset();
+      } catch (error) {
+        console.error(error);
+        setStatus('Unable to generate suggestion');
+        if (envIndicator) {
+          envIndicator.textContent = 'AI unavailable';
+        }
+      }
+    });
+  }
+  if (applyButton) {
+    applyButton.addEventListener('click', () => {
+      if (!pendingSuggestion || !pendingSuggestion.code || !editor) return;
+      editor.value = pendingSuggestion.code;
+      markDirty();
+      setStatus('Applied AI suggestion. Review and save.');
+    });
+  }
+
+  loadProjects();
+
   return widget;
 }
 
 function createDocumentWidget(record) {
   const widget = buildWidgetShell('document', record, {
     title: 'Document writer',
-    width: 480,
-    height: 500,
+    width: 620,
+    height: 520,
     offset: { left: 360, top: 140 },
     body: `
-      <div class="widget-app widget-app--split document-widget">
-        <section class="widget-app__panel document-widget__composer" aria-label="Outline builder">
+      <div class="document-widget document-widget--upgraded">
+        <section class="document-widget__inputs" aria-label="Draft brief">
           <div class="widget-app__panel-header">
-            <h3>Outline</h3>
-            <span class="document-widget__badge">Draft mode</span>
+            <h3>Brief</h3>
+            <span class="document-widget__badge" data-document-status>Awaiting details</span>
           </div>
-          <form class="widget-form" data-document-form>
-            <label class="widget-field">
-              <span>Working title</span>
-              <input type="text" name="title" placeholder="Growth strategy brief" required />
+          <form class="document-widget__form" data-document-form>
+            <label class="document-widget__field">
+              <span>Topic</span>
+              <input type="text" name="topic" placeholder="Launch strategy memo" required />
             </label>
-            <label class="widget-field">
+            <label class="document-widget__field">
+              <span>Audience</span>
+              <input type="text" name="audience" placeholder="Executive team" required />
+            </label>
+            <label class="document-widget__field">
+              <span>Tone</span>
+              <select name="tone">
+                <option value="pragmatic" selected>Pragmatic</option>
+                <option value="inspirational">Inspirational</option>
+                <option value="analytical">Analytical</option>
+              </select>
+            </label>
+            <label class="document-widget__field">
               <span>Key points</span>
-              <textarea name="outline" placeholder="Bullet out the narrative and supporting points" required></textarea>
+              <textarea name="keypoints" rows="4" placeholder="Differentiated insight\nRisk mitigation plan"></textarea>
             </label>
-            <div class="widget-form__actions">
-              <button type="submit" class="btn btn--primary">Draft outline</button>
+            <div class="document-widget__actions">
+              <button type="submit" class="btn btn--primary">Draft with AI</button>
             </div>
           </form>
         </section>
-        <section class="widget-app__panel document-widget__preview-panel" aria-live="polite">
-          <div class="widget-app__panel-header">
-            <h3>Preview</h3>
-            <span class="document-widget__status" data-document-status>Awaiting draft</span>
+        <section class="document-widget__output" aria-live="polite">
+          <article class="document-widget__summary">
+            <h3 data-document-title>Strategy brief</h3>
+            <p class="document-widget__summary-text" data-document-summary>
+              Provide a topic and audience to generate a tailored memo.
+            </p>
+          </article>
+          <div class="document-widget__grid">
+            <div class="document-widget__outline">
+              <h4>Outline</h4>
+              <ol class="document-widget__outline-list" data-document-outline>
+                <li class="document-widget__placeholder">Outline will populate after generation.</li>
+              </ol>
+            </div>
+            <div class="document-widget__cta">
+              <h4>Call to action</h4>
+              <ul class="document-widget__cta-list" data-document-cta>
+                <li class="document-widget__placeholder">Actions will appear here.</li>
+              </ul>
+            </div>
           </div>
-          <article class="document-widget__preview" data-document-output></article>
+          <div class="document-widget__sections" data-document-sections></div>
         </section>
       </div>
     `,
   });
+
   const form = widget.querySelector('[data-document-form]');
-  const output = widget.querySelector('[data-document-output]');
   const statusEl = widget.querySelector('[data-document-status]');
-  if (form && output) {
-    form.addEventListener('submit', (event) => {
+  const titleEl = widget.querySelector('[data-document-title]');
+  const summaryEl = widget.querySelector('[data-document-summary]');
+  const outlineEl = widget.querySelector('[data-document-outline]');
+  const ctaEl = widget.querySelector('[data-document-cta]');
+  const sectionsEl = widget.querySelector('[data-document-sections]');
+
+  const setStatus = (text) => {
+    if (statusEl) {
+      statusEl.textContent = text;
+    }
+  };
+
+  const renderList = (container, items, emptyMessage) => {
+    if (!container) return;
+    container.innerHTML = '';
+    if (!items || !items.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className = 'document-widget__placeholder';
+      placeholder.textContent = emptyMessage;
+      container.appendChild(placeholder);
+      return;
+    }
+    items.forEach((item) => {
+      const listItem = document.createElement(container.tagName === 'OL' ? 'li' : 'li');
+      listItem.textContent = item;
+      container.appendChild(listItem);
+    });
+  };
+
+  const renderSections = (sections) => {
+    if (!sectionsEl) return;
+    sectionsEl.innerHTML = '';
+    if (!sections || !sections.length) {
+      const placeholder = document.createElement('p');
+      placeholder.className = 'document-widget__placeholder';
+      placeholder.textContent = 'Add more context to generate section drafts.';
+      sectionsEl.appendChild(placeholder);
+      return;
+    }
+    sections.forEach((section) => {
+      const card = document.createElement('article');
+      card.className = 'document-widget__section-card';
+      const heading = document.createElement('h4');
+      heading.textContent = section.heading;
+      const paragraph = document.createElement('p');
+      paragraph.textContent = section.content;
+      card.appendChild(heading);
+      card.appendChild(paragraph);
+      sectionsEl.appendChild(card);
+    });
+  };
+
+  if (form) {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const title = form.querySelector('[name="title"]').value.trim();
-      const outline = form.querySelector('[name="outline"]').value
+      const formData = new FormData(form);
+      const topic = String(formData.get('topic') || '').trim();
+      const audience = String(formData.get('audience') || '').trim();
+      const tone = String(formData.get('tone') || 'pragmatic');
+      const keypointsRaw = String(formData.get('keypoints') || '');
+      const keyPoints = keypointsRaw
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean);
-      if (!title || !outline.length) return;
-      output.innerHTML = `
-        <h3>${title}</h3>
-        <p>${outline[0]}</p>
-        <ul>${outline.slice(1).map((item) => `<li>${item}</li>`).join('')}</ul>
-        <p class="document-widget__hint">Full draft will render here once the document API is linked.</p>
-      `;
-      if (statusEl) {
-        statusEl.textContent = 'Draft ready';
+      if (!topic || !audience) return;
+
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      setStatus('Drafting with AI…');
+
+      try {
+        const response = await fetchJSON('/api/document/draft', {
+          method: 'POST',
+          body: JSON.stringify({ topic, audience, tone, key_points: keyPoints }),
+        });
+        if (titleEl) titleEl.textContent = response.title;
+        if (summaryEl) summaryEl.textContent = response.summary;
+        renderList(outlineEl, response.outline, 'Outline will populate after generation.');
+        renderList(ctaEl, response.call_to_actions, 'Add context to receive call to actions.');
+        renderSections(response.sections);
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setStatus(`Draft ready • ${response.model} @ ${timestamp}`);
+      } catch (error) {
+        console.error(error);
+        setStatus('Unable to generate draft');
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }
@@ -1189,59 +1616,162 @@ function createDocumentWidget(record) {
 function createPresentationWidget(record) {
   const widget = buildWidgetShell('presentation', record, {
     title: 'Presentation builder',
-    width: 500,
-    height: 520,
+    width: 640,
+    height: 540,
     offset: { left: 420, top: 220 },
     body: `
-      <div class="widget-app widget-app--split presentation-widget">
-        <section class="widget-app__panel presentation-widget__composer" aria-label="Deck inputs">
+      <div class="presentation-widget presentation-widget--upgraded">
+        <section class="presentation-widget__inputs" aria-label="Presentation brief">
           <div class="widget-app__panel-header">
             <h3>Deck brief</h3>
-            <span class="presentation-widget__badge">Slides in draft</span>
+            <span class="presentation-widget__badge" data-presentation-status>Awaiting goals</span>
           </div>
-          <form class="widget-form" data-presentation-form>
-            <label class="widget-field">
+          <form class="presentation-widget__form" data-presentation-form>
+            <label class="presentation-widget__field">
+              <span>Theme</span>
+              <input type="text" name="theme" placeholder="AI assistant launch" required />
+            </label>
+            <label class="presentation-widget__field">
               <span>Audience</span>
-              <input type="text" name="audience" placeholder="Product leadership" required />
+              <input type="text" name="audience" placeholder="Executive staff meeting" required />
             </label>
-            <label class="widget-field">
-              <span>Slide notes</span>
-              <textarea name="slides" placeholder="One slide idea per line" required></textarea>
+            <label class="presentation-widget__field">
+              <span>Duration (minutes)</span>
+              <input type="number" name="duration" min="5" max="90" value="20" />
             </label>
-            <div class="widget-form__actions">
-              <button type="submit" class="btn btn--primary">Generate deck plan</button>
+            <label class="presentation-widget__field">
+              <span>Goals</span>
+              <textarea name="goals" rows="3" placeholder="Secure funding\nAlign launch owners"></textarea>
+            </label>
+            <div class="presentation-widget__actions">
+              <button type="submit" class="btn btn--primary">Plan slides</button>
             </div>
           </form>
         </section>
-        <section class="widget-app__panel presentation-widget__preview-panel" aria-live="polite">
-          <div class="widget-app__panel-header">
-            <h3>Storyboard</h3>
-            <span class="presentation-widget__status" data-presentation-status>Awaiting structure</span>
+        <section class="presentation-widget__output" aria-live="polite">
+          <article class="presentation-widget__headline">
+            <h3 data-presentation-headline>Pitch narrative</h3>
+            <p class="presentation-widget__summary" data-presentation-summary>Set the context to generate slide guidance.</p>
+          </article>
+          <div class="presentation-widget__slides" data-presentation-slides>
+            <p class="presentation-widget__placeholder">Slides will appear once the brief is drafted.</p>
           </div>
-          <div class="presentation-widget__preview" data-presentation-output></div>
+          <div class="presentation-widget__next">
+            <h4>Next steps</h4>
+            <ul class="presentation-widget__actions-list" data-presentation-actions>
+              <li class="presentation-widget__placeholder">Next steps will populate after generation.</li>
+            </ul>
+          </div>
         </section>
       </div>
     `,
   });
+
   const form = widget.querySelector('[data-presentation-form]');
-  const output = widget.querySelector('[data-presentation-output]');
   const statusEl = widget.querySelector('[data-presentation-status]');
-  if (form && output) {
-    form.addEventListener('submit', (event) => {
+  const headlineEl = widget.querySelector('[data-presentation-headline]');
+  const summaryEl = widget.querySelector('[data-presentation-summary]');
+  const slidesContainer = widget.querySelector('[data-presentation-slides]');
+  const actionsList = widget.querySelector('[data-presentation-actions]');
+
+  const setStatus = (text) => {
+    if (statusEl) {
+      statusEl.textContent = text;
+    }
+  };
+
+  const renderSlides = (slides) => {
+    if (!slidesContainer) return;
+    slidesContainer.innerHTML = '';
+    if (!slides || !slides.length) {
+      const placeholder = document.createElement('p');
+      placeholder.className = 'presentation-widget__placeholder';
+      placeholder.textContent = 'Add more detail to generate slide structure.';
+      slidesContainer.appendChild(placeholder);
+      return;
+    }
+    slides.forEach((slide) => {
+      const card = document.createElement('article');
+      card.className = 'presentation-widget__slide-card';
+      const title = document.createElement('h4');
+      title.textContent = slide.title;
+      const bulletList = document.createElement('ul');
+      bulletList.className = 'presentation-widget__bullets';
+      (slide.bullets || []).forEach((bullet) => {
+        const item = document.createElement('li');
+        item.textContent = bullet;
+        bulletList.appendChild(item);
+      });
+      card.appendChild(title);
+      if (slide.visual) {
+        const caption = document.createElement('p');
+        caption.className = 'presentation-widget__visual';
+        caption.textContent = slide.visual;
+        card.appendChild(caption);
+      }
+      card.appendChild(bulletList);
+      slidesContainer.appendChild(card);
+    });
+  };
+
+  const renderActions = (items) => {
+    if (!actionsList) return;
+    actionsList.innerHTML = '';
+    if (!items || !items.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className = 'presentation-widget__placeholder';
+      placeholder.textContent = 'Add clear goals to receive recommended actions.';
+      actionsList.appendChild(placeholder);
+      return;
+    }
+    items.forEach((item) => {
+      const listItem = document.createElement('li');
+      listItem.textContent = item;
+      actionsList.appendChild(listItem);
+    });
+  };
+
+  if (form) {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const audience = form.querySelector('[name="audience"]').value.trim();
-      const slides = form
-        .querySelector('[name="slides"]').value.split('\n')
-        .map((item) => item.trim())
+      const formData = new FormData(form);
+      const theme = String(formData.get('theme') || '').trim();
+      const audience = String(formData.get('audience') || '').trim();
+      const duration = Number(formData.get('duration') || 15);
+      const goalsRaw = String(formData.get('goals') || '');
+      const goals = goalsRaw
+        .split('\n')
+        .map((line) => line.trim())
         .filter(Boolean);
-      if (!audience || !slides.length) return;
-      output.innerHTML = `
-        <h3>Deck preview for ${audience}</h3>
-        <ol>${slides.map((slide, index) => `<li><span>Slide ${index + 1}:</span> ${slide}</li>`).join('')}</ol>
-        <p class="presentation-widget__hint">Slides render on canvas after integrating the presentation service.</p>
-      `;
-      if (statusEl) {
-        statusEl.textContent = `${slides.length} slide${slides.length === 1 ? '' : 's'} drafted`;
+      if (!theme || !audience) return;
+
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      setStatus('Assembling slides…');
+
+      try {
+        const response = await fetchJSON('/api/presentation/plan', {
+          method: 'POST',
+          body: JSON.stringify({
+            theme,
+            audience,
+            duration_minutes: duration,
+            goals,
+          }),
+        });
+        if (headlineEl) headlineEl.textContent = response.headline;
+        if (summaryEl) {
+          summaryEl.textContent = `Tailored for ${audience} • ${duration} minute flow.`;
+        }
+        renderSlides(response.slides);
+        renderActions(response.next_steps);
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setStatus(`Plan ready • ${response.model} @ ${timestamp}`);
+      } catch (error) {
+        console.error(error);
+        setStatus('Unable to generate presentation');
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }
@@ -1251,64 +1781,145 @@ function createPresentationWidget(record) {
 function createDataWidget(record) {
   const widget = buildWidgetShell('data', record, {
     title: 'Data visualizer',
-    width: 500,
-    height: 480,
+    width: 640,
+    height: 500,
     offset: { left: 340, top: 260 },
     body: `
-      <div class="widget-app widget-app--split data-widget">
-        <section class="widget-app__panel data-widget__composer" aria-label="Chart builder">
+      <div class="data-widget data-widget--upgraded">
+        <section class="data-widget__inputs" aria-label="Describe dataset">
           <div class="widget-app__panel-header">
-            <h3>Chart builder</h3>
-            <span class="data-widget__badge">Preview only</span>
+            <h3>Dataset</h3>
+            <span class="data-widget__status" data-data-status>Awaiting description</span>
           </div>
-          <form class="widget-form" data-data-form>
-            <label class="widget-field">
+          <form class="data-widget__form" data-data-form>
+            <label class="data-widget__field">
               <span>Dataset description</span>
-              <textarea name="dataset" placeholder="Paste rows or describe the KPIs to plot" required></textarea>
+              <textarea name="dataset" rows="3" placeholder="Monthly active users by region" required></textarea>
             </label>
-            <label class="widget-field">
-              <span>Chart style</span>
+            <label class="data-widget__field">
+              <span>Chart preference</span>
               <select name="chart">
-                <option value="line">Line</option>
                 <option value="bar">Bar</option>
+                <option value="line">Line</option>
                 <option value="pie">Pie</option>
-                <option value="scatter">Scatter</option>
               </select>
             </label>
-            <div class="widget-form__actions">
-              <button type="submit" class="btn btn--primary">Preview insight</button>
+            <label class="data-widget__field">
+              <span>Decision goal</span>
+              <input type="text" name="goal" placeholder="Highlight regions to prioritize" />
+            </label>
+            <div class="data-widget__actions">
+              <button type="submit" class="btn btn--primary">Visualize</button>
             </div>
           </form>
         </section>
-        <section class="widget-app__panel data-widget__preview-panel" aria-live="polite">
-          <div class="widget-app__panel-header">
-            <h3>Visual output</h3>
-            <span class="data-widget__status" data-data-status>Waiting for prompt</span>
+        <section class="data-widget__output" aria-live="polite">
+          <div class="data-widget__chart" data-data-chart>
+            <p class="data-widget__placeholder">Visualizations land here after generation.</p>
           </div>
-          <div class="data-widget__preview" data-data-output>
-            <p class="widget__hint">Visualisations will appear here once the data service is connected.</p>
-          </div>
+          <aside class="data-widget__insights">
+            <h4>Insights</h4>
+            <p class="data-widget__summary" data-data-summary>Summaries appear after generation.</p>
+            <ul class="data-widget__insight-list" data-data-insights>
+              <li class="data-widget__placeholder">Add a dataset to surface insights.</li>
+            </ul>
+          </aside>
         </section>
       </div>
     `,
   });
   const form = widget.querySelector('[data-data-form]');
-  const output = widget.querySelector('[data-data-output]');
   const statusEl = widget.querySelector('[data-data-status]');
-  if (form && output) {
-    form.addEventListener('submit', (event) => {
+  const chartEl = widget.querySelector('[data-data-chart]');
+  const summaryEl = widget.querySelector('[data-data-summary]');
+  const insightsEl = widget.querySelector('[data-data-insights]');
+
+  const setStatus = (text) => {
+    if (statusEl) {
+      statusEl.textContent = text;
+    }
+  };
+
+  const renderInsights = (insights) => {
+    if (!insightsEl) return;
+    insightsEl.innerHTML = '';
+    if (!insights || !insights.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className = 'data-widget__placeholder';
+      placeholder.textContent = 'Add a richer brief to surface insights.';
+      insightsEl.appendChild(placeholder);
+      return;
+    }
+    insights.forEach((insight) => {
+      const item = document.createElement('li');
+      item.textContent = insight;
+      insightsEl.appendChild(item);
+    });
+  };
+
+  const renderChart = (dataset, chartType) => {
+    if (!chartEl) return;
+    chartEl.innerHTML = '';
+    if (!dataset || !dataset.length) {
+      const placeholder = document.createElement('p');
+      placeholder.className = 'data-widget__placeholder';
+      placeholder.textContent = 'Provide more context to render a chart.';
+      chartEl.appendChild(placeholder);
+      return;
+    }
+    const area = document.createElement('div');
+    area.className = `data-widget__chart-area data-widget__chart-area--${chartType}`;
+    const maxValue = Math.max(...dataset.map((point) => Number(point.value) || 0));
+    dataset.forEach((point) => {
+      const bar = document.createElement('div');
+      bar.className = 'data-widget__bar';
+      const ratio = maxValue > 0 ? Math.max((Number(point.value) / maxValue) * 100, 5) : 5;
+      bar.style.setProperty('--bar-height', `${ratio}%`);
+      const value = document.createElement('span');
+      value.className = 'data-widget__bar-value';
+      value.textContent = Number(point.value).toLocaleString(undefined, { maximumFractionDigits: 1 });
+      const label = document.createElement('span');
+      label.className = 'data-widget__bar-label';
+      label.textContent = point.label;
+      bar.appendChild(value);
+      bar.appendChild(label);
+      area.appendChild(bar);
+    });
+    chartEl.appendChild(area);
+  };
+
+  if (form) {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const description = form.querySelector('[name="dataset"]').value.trim();
-      if (!description) return;
-      const chart = form.querySelector('[name="chart"]').value;
-      output.innerHTML = `
-        <div class="data-widget__chart">
-          <p>${chart.toUpperCase()} chart preview</p>
-          <p class="data-widget__summary">${description.slice(0, 140)}…</p>
-        </div>
-      `;
-      if (statusEl) {
-        statusEl.textContent = `${chart} chart staged`;
+      const formData = new FormData(form);
+      const datasetDescription = String(formData.get('dataset') || '').trim();
+      const chartPreference = String(formData.get('chart') || 'bar');
+      const goal = String(formData.get('goal') || '').trim();
+      if (!datasetDescription) return;
+
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      setStatus('Asking AI to chart your data…');
+
+      try {
+        const response = await fetchJSON('/api/data/visualize', {
+          method: 'POST',
+          body: JSON.stringify({
+            dataset_description: datasetDescription,
+            chart_preference: chartPreference,
+            goal: goal || null,
+          }),
+        });
+        renderChart(response.dataset, response.chart_type);
+        if (summaryEl) summaryEl.textContent = response.summary;
+        renderInsights(response.insights);
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setStatus(`Visualization ready • ${response.model} @ ${timestamp}`);
+      } catch (error) {
+        console.error(error);
+        setStatus('Unable to visualize data');
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }
@@ -1318,56 +1929,152 @@ function createDataWidget(record) {
 function createGameWidget(record) {
   const widget = buildWidgetShell('game', record, {
     title: 'Game builder',
-    width: 520,
+    width: 620,
     height: 520,
     offset: { left: 260, top: 300 },
     body: `
-      <div class="widget-app widget-app--split game-widget">
-        <section class="widget-app__panel game-widget__composer" aria-label="Concept builder">
+      <div class="game-widget game-widget--upgraded">
+        <section class="game-widget__inputs" aria-label="Concept builder">
           <div class="widget-app__panel-header">
-            <h3>Concept</h3>
-            <span class="game-widget__badge">Prototype sketch</span>
+            <h3>Concept brief</h3>
+            <span class="game-widget__badge" data-game-status>Awaiting idea</span>
           </div>
-          <form class="widget-form" data-game-form>
-            <label class="widget-field">
+          <form class="game-widget__form" data-game-form>
+            <label class="game-widget__field">
               <span>Core fantasy</span>
-              <input type="text" name="fantasy" placeholder="E.g. Design your own solar empire" required />
+              <input type="text" name="fantasy" placeholder="Design your own solar empire" required />
             </label>
-            <label class="widget-field">
-              <span>Game loop</span>
-              <textarea name="loop" placeholder="Describe the repeatable actions" required></textarea>
+            <label class="game-widget__field">
+              <span>Genre</span>
+              <select name="genre">
+                <option value="strategy">Strategy</option>
+                <option value="adventure">Adventure</option>
+                <option value="simulation">Simulation</option>
+                <option value="puzzle">Puzzle</option>
+              </select>
             </label>
-            <div class="widget-form__actions">
-              <button type="submit" class="btn btn--primary">Prototype concept</button>
+            <label class="game-widget__field">
+              <span>Key pillars</span>
+              <textarea name="pillars" rows="3" placeholder="Collaborative planning\nAI-powered world\nSeasonal events"></textarea>
+            </label>
+            <label class="game-widget__field">
+              <span>Primary platform</span>
+              <input type="text" name="platform" placeholder="Cross-platform" />
+            </label>
+            <div class="game-widget__actions">
+              <button type="submit" class="btn btn--primary">Generate design</button>
             </div>
           </form>
         </section>
-        <section class="widget-app__panel game-widget__preview-panel" aria-live="polite">
-          <div class="widget-app__panel-header">
-            <h3>Playable beats</h3>
-            <span class="game-widget__status" data-game-status>Awaiting concept</span>
+        <section class="game-widget__output" aria-live="polite">
+          <article class="game-widget__pitch" data-game-pitch>
+            <h3>Pitch</h3>
+            <p class="game-widget__placeholder">Outline your fantasy to unlock a full design kit.</p>
+          </article>
+          <div class="game-widget__grid">
+            <div>
+              <h4>Core loop</h4>
+              <ul class="game-widget__list" data-game-loop>
+                <li class="game-widget__placeholder">Loop steps will appear here.</li>
+              </ul>
+            </div>
+            <div>
+              <h4>Mechanics</h4>
+              <ul class="game-widget__list" data-game-mechanics>
+                <li class="game-widget__placeholder">Add pillars to receive mechanics.</li>
+              </ul>
+            </div>
+            <div>
+              <h4>Progression</h4>
+              <ul class="game-widget__list" data-game-progression>
+                <li class="game-widget__placeholder">Progression beats will display once generated.</li>
+              </ul>
+            </div>
           </div>
-          <div class="game-widget__preview" data-game-output></div>
+          <div class="game-widget__meta">
+            <h4>Monetization</h4>
+            <ul class="game-widget__list" data-game-monetization>
+              <li class="game-widget__placeholder">Monetization levers will appear here.</li>
+            </ul>
+          </div>
         </section>
       </div>
     `,
   });
+
   const form = widget.querySelector('[data-game-form]');
-  const output = widget.querySelector('[data-game-output]');
   const statusEl = widget.querySelector('[data-game-status]');
-  if (form && output) {
-    form.addEventListener('submit', (event) => {
+  const pitchEl = widget.querySelector('[data-game-pitch]');
+  const loopEl = widget.querySelector('[data-game-loop]');
+  const mechanicsEl = widget.querySelector('[data-game-mechanics]');
+  const progressionEl = widget.querySelector('[data-game-progression]');
+  const monetizationEl = widget.querySelector('[data-game-monetization]');
+
+  const setStatus = (text) => {
+    if (statusEl) {
+      statusEl.textContent = text;
+    }
+  };
+
+  const renderList = (container, items, placeholderText) => {
+    if (!container) return;
+    container.innerHTML = '';
+    if (!items || !items.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className = 'game-widget__placeholder';
+      placeholder.textContent = placeholderText;
+      container.appendChild(placeholder);
+      return;
+    }
+    items.forEach((item) => {
+      const listItem = document.createElement('li');
+      listItem.textContent = item;
+      container.appendChild(listItem);
+    });
+  };
+
+  if (form) {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const fantasy = form.querySelector('[name="fantasy"]').value.trim();
-      const loop = form.querySelector('[name="loop"]').value.trim();
-      if (!fantasy || !loop) return;
-      output.innerHTML = `
-        <h3>${fantasy}</h3>
-        <p>${loop}</p>
-        <p class="game-widget__hint">Scene blocks and mechanics will materialise here after connecting the game runtime.</p>
-      `;
-      if (statusEl) {
-        statusEl.textContent = 'Concept staged';
+      const formData = new FormData(form);
+      const fantasy = String(formData.get('fantasy') || '').trim();
+      const genre = String(formData.get('genre') || 'strategy');
+      const pillarsRaw = String(formData.get('pillars') || '');
+      const platform = String(formData.get('platform') || '').trim();
+      if (!fantasy) return;
+      const pillars = pillarsRaw
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      setStatus('Designing gameplay…');
+
+      try {
+        const response = await fetchJSON('/api/game/concept', {
+          method: 'POST',
+          body: JSON.stringify({
+            fantasy,
+            genre,
+            pillars,
+            platform: platform || null,
+          }),
+        });
+        if (pitchEl) {
+          pitchEl.innerHTML = `<h3>Pitch</h3><p>${response.elevator_pitch}</p>`;
+        }
+        renderList(loopEl, response.core_loop, 'Loop steps will appear here.');
+        renderList(mechanicsEl, response.mechanics, 'Add pillars to receive mechanics.');
+        renderList(progressionEl, response.progression, 'Progression beats will display once generated.');
+        renderList(monetizationEl, response.monetization, 'Monetization levers will appear here.');
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setStatus(`Concept ready • ${response.model} @ ${timestamp}`);
+      } catch (error) {
+        console.error(error);
+        setStatus('Unable to generate concept');
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }
@@ -1377,62 +2084,152 @@ function createGameWidget(record) {
 function createAvatarWidget(record) {
   const widget = buildWidgetShell('avatar', record, {
     title: 'Avatar creator',
-    width: 460,
+    width: 520,
     height: 480,
     offset: { left: 220, top: 340 },
     body: `
-      <div class="widget-app widget-app--split avatar-widget">
-        <section class="widget-app__panel avatar-widget__composer" aria-label="Persona builder">
+      <div class="avatar-widget avatar-widget--upgraded">
+        <section class="avatar-widget__inputs" aria-label="Persona builder">
           <div class="widget-app__panel-header">
-            <h3>Persona</h3>
-            <span class="avatar-widget__badge">Creative brief</span>
+            <h3>Persona brief</h3>
+            <span class="avatar-widget__badge" data-avatar-status>Awaiting direction</span>
           </div>
-          <form class="widget-form" data-avatar-form>
-            <label class="widget-field">
+          <form class="avatar-widget__form" data-avatar-form>
+            <label class="avatar-widget__field">
+              <span>Name</span>
+              <input type="text" name="name" placeholder="Aurora" required />
+            </label>
+            <label class="avatar-widget__field">
               <span>Visual style</span>
               <select name="style">
-                <option value="cartoon">Cartoon</option>
-                <option value="voxel">Voxel</option>
+                <option value="illustrated">Illustrated</option>
+                <option value="cyberpunk">Cyberpunk</option>
+                <option value="minimal">Minimal</option>
                 <option value="photorealistic">Photorealistic</option>
               </select>
             </label>
-            <label class="widget-field">
-              <span>Persona notes</span>
-              <textarea name="notes" placeholder="Describe personality, outfit, and pose" required></textarea>
+            <label class="avatar-widget__field">
+              <span>Vibe</span>
+              <input type="text" name="vibe" placeholder="Optimistic strategist" />
             </label>
-            <div class="widget-form__actions">
+            <label class="avatar-widget__field">
+              <span>Palette hint</span>
+              <input type="text" name="palette" placeholder="#38bdf8, midnight blue" />
+            </label>
+            <div class="avatar-widget__actions">
               <button type="submit" class="btn btn--primary">Design avatar</button>
             </div>
           </form>
         </section>
-        <section class="widget-app__panel avatar-widget__preview-panel" aria-live="polite">
-          <div class="widget-app__panel-header">
-            <h3>Moodboard</h3>
-            <span class="avatar-widget__status" data-avatar-status>Awaiting brief</span>
+        <section class="avatar-widget__output" aria-live="polite">
+          <article class="avatar-widget__summary" data-avatar-summary>
+            <h3>Concept summary</h3>
+            <p class="avatar-widget__placeholder">Provide a persona brief to generate style guidance.</p>
+          </article>
+          <div class="avatar-widget__palette" data-avatar-palette></div>
+          <div class="avatar-widget__traits">
+            <h4>Accessories</h4>
+            <ul class="avatar-widget__list" data-avatar-accessories>
+              <li class="avatar-widget__placeholder">Accessories will appear here.</li>
+            </ul>
           </div>
-          <div class="avatar-widget__preview" data-avatar-output></div>
+          <div class="avatar-widget__prompt">
+            <h4>Image prompt</h4>
+            <code data-avatar-prompt>Waiting for brief…</code>
+          </div>
         </section>
       </div>
     `,
   });
+
   const form = widget.querySelector('[data-avatar-form]');
-  const output = widget.querySelector('[data-avatar-output]');
   const statusEl = widget.querySelector('[data-avatar-status]');
-  if (form && output) {
-    form.addEventListener('submit', (event) => {
+  const summaryEl = widget.querySelector('[data-avatar-summary]');
+  const paletteEl = widget.querySelector('[data-avatar-palette]');
+  const accessoriesEl = widget.querySelector('[data-avatar-accessories]');
+  const promptEl = widget.querySelector('[data-avatar-prompt]');
+
+  const setStatus = (text) => {
+    if (statusEl) {
+      statusEl.textContent = text;
+    }
+  };
+
+  const renderPalette = (palette) => {
+    if (!paletteEl) return;
+    paletteEl.innerHTML = '';
+    if (!palette || !palette.length) {
+      const placeholder = document.createElement('p');
+      placeholder.className = 'avatar-widget__placeholder';
+      placeholder.textContent = 'Palette suggestions will appear here.';
+      paletteEl.appendChild(placeholder);
+      return;
+    }
+    palette.forEach((hex) => {
+      const swatch = document.createElement('span');
+      swatch.className = 'avatar-widget__swatch';
+      swatch.style.setProperty('--swatch-color', hex);
+      swatch.title = hex;
+      paletteEl.appendChild(swatch);
+    });
+  };
+
+  const renderAccessories = (items) => {
+    if (!accessoriesEl) return;
+    accessoriesEl.innerHTML = '';
+    if (!items || !items.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className = 'avatar-widget__placeholder';
+      placeholder.textContent = 'Add more detail to receive accessory ideas.';
+      accessoriesEl.appendChild(placeholder);
+      return;
+    }
+    items.forEach((item) => {
+      const li = document.createElement('li');
+      li.textContent = item;
+      accessoriesEl.appendChild(li);
+    });
+  };
+
+  if (form) {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const style = form.querySelector('[name="style"]').value;
-      const notes = form.querySelector('[name="notes"]').value.trim();
-      if (!notes) return;
-      output.innerHTML = `
-        <div class="avatar-widget__card">
-          <span class="avatar-widget__style">${style}</span>
-          <p>${notes}</p>
-        </div>
-        <p class="avatar-widget__hint">Preview image will display once the avatar pipeline is wired up.</p>
-      `;
-      if (statusEl) {
-        statusEl.textContent = `${style} persona drafted`;
+      const formData = new FormData(form);
+      const name = String(formData.get('name') || '').trim();
+      const style = String(formData.get('style') || 'illustrated');
+      const vibe = String(formData.get('vibe') || '').trim();
+      const paletteHint = String(formData.get('palette') || '').trim();
+      if (!name) return;
+
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      setStatus('Designing persona…');
+
+      try {
+        const response = await fetchJSON('/api/avatar/design', {
+          method: 'POST',
+          body: JSON.stringify({
+            name,
+            style,
+            vibe: vibe || null,
+            palette_hint: paletteHint || null,
+          }),
+        });
+        if (summaryEl) {
+          summaryEl.innerHTML = `<h3>${response.concept_name}</h3><p>${response.description}</p>`;
+        }
+        renderPalette(response.palette);
+        renderAccessories(response.accessories);
+        if (promptEl) {
+          promptEl.textContent = response.prompt;
+        }
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setStatus(`Concept ready • ${response.model} @ ${timestamp}`);
+      } catch (error) {
+        console.error(error);
+        setStatus('Unable to design avatar');
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }
@@ -1442,61 +2239,174 @@ function createAvatarWidget(record) {
 function createSimulationWidget(record) {
   const widget = buildWidgetShell('simulation', record, {
     title: 'Simulation sandbox',
-    width: 520,
-    height: 460,
+    width: 640,
+    height: 500,
     offset: { left: 420, top: 320 },
     body: `
-      <div class="widget-app widget-app--split simulation-widget">
-        <section class="widget-app__panel simulation-widget__composer" aria-label="Scenario setup">
+      <div class="simulation-widget simulation-widget--upgraded">
+        <section class="simulation-widget__inputs" aria-label="Scenario setup">
           <div class="widget-app__panel-header">
             <h3>Scenario setup</h3>
-            <span class="simulation-widget__badge">Preview run</span>
+            <span class="simulation-widget__badge" data-simulation-status>Idle</span>
           </div>
-          <form class="widget-form" data-simulation-form>
-            <label class="widget-field">
+          <form class="simulation-widget__form" data-simulation-form>
+            <label class="simulation-widget__field">
               <span>Scenario</span>
               <input type="text" name="scenario" placeholder="Launch day traffic surge" required />
             </label>
-            <label class="widget-field">
-              <span>Variables</span>
-              <textarea name="variables" placeholder="List inputs to simulate" required></textarea>
+            <label class="simulation-widget__field">
+              <span>Time horizon</span>
+              <input type="text" name="horizon" placeholder="30 days" />
             </label>
-            <div class="widget-form__actions">
+            <label class="simulation-widget__field">
+              <span>Key metrics</span>
+              <textarea name="metrics" rows="3" placeholder="Conversion rate\nLatency\nSupport volume"></textarea>
+            </label>
+            <div class="simulation-widget__actions">
               <button type="submit" class="btn btn--primary">Run simulation</button>
             </div>
           </form>
         </section>
-        <section class="widget-app__panel simulation-widget__preview-panel" aria-live="polite">
-          <div class="widget-app__panel-header">
-            <h3>Projected output</h3>
-            <span class="simulation-widget__status" data-simulation-status>Idle</span>
-          </div>
-          <div class="simulation-widget__output" data-simulation-output>
-            <p class="widget__hint">Model outputs will stream here as soon as the physics service is ready.</p>
+        <section class="simulation-widget__output" aria-live="polite">
+          <article class="simulation-widget__summary" data-simulation-summary>
+            <h3>Simulation summary</h3>
+            <p class="simulation-widget__placeholder">Describe a scenario to preview AI-driven projections.</p>
+          </article>
+          <div class="simulation-widget__timeline" data-simulation-timeline></div>
+          <div class="simulation-widget__metrics" data-simulation-metrics></div>
+          <div class="simulation-widget__risks">
+            <h4>Risks &amp; follow-ups</h4>
+            <ul class="simulation-widget__list" data-simulation-risks>
+              <li class="simulation-widget__placeholder">Risks will appear here once the run completes.</li>
+            </ul>
           </div>
         </section>
       </div>
     `,
   });
+
   const form = widget.querySelector('[data-simulation-form]');
-  const output = widget.querySelector('[data-simulation-output]');
   const statusEl = widget.querySelector('[data-simulation-status]');
-  if (form && output) {
-    form.addEventListener('submit', (event) => {
+  const summaryEl = widget.querySelector('[data-simulation-summary]');
+  const timelineEl = widget.querySelector('[data-simulation-timeline]');
+  const metricsEl = widget.querySelector('[data-simulation-metrics]');
+  const risksEl = widget.querySelector('[data-simulation-risks]');
+
+  const setStatus = (text) => {
+    if (statusEl) {
+      statusEl.textContent = text;
+    }
+  };
+
+  const renderTimeline = (timeline) => {
+    if (!timelineEl) return;
+    timelineEl.innerHTML = '';
+    if (!timeline || !timeline.length) {
+      const placeholder = document.createElement('p');
+      placeholder.className = 'simulation-widget__placeholder';
+      placeholder.textContent = 'Timeline beats will appear here.';
+      timelineEl.appendChild(placeholder);
+      return;
+    }
+    const list = document.createElement('ol');
+    list.className = 'simulation-widget__timeline-list';
+    timeline.forEach((entry) => {
+      const item = document.createElement('li');
+      const label = document.createElement('strong');
+      label.textContent = entry.phase;
+      const detail = document.createElement('span');
+      detail.textContent = entry.details;
+      item.appendChild(label);
+      item.appendChild(detail);
+      list.appendChild(item);
+    });
+    timelineEl.appendChild(list);
+  };
+
+  const renderMetrics = (metrics) => {
+    if (!metricsEl) return;
+    metricsEl.innerHTML = '';
+    if (!metrics || !metrics.length) {
+      const placeholder = document.createElement('p');
+      placeholder.className = 'simulation-widget__placeholder';
+      placeholder.textContent = 'Include metrics in your brief to track them here.';
+      metricsEl.appendChild(placeholder);
+      return;
+    }
+    const table = document.createElement('div');
+    table.className = 'simulation-widget__metrics-grid';
+    metrics.forEach((metric) => {
+      const card = document.createElement('div');
+      card.className = 'simulation-widget__metric-card';
+      const name = document.createElement('span');
+      name.className = 'simulation-widget__metric-name';
+      name.textContent = metric.name;
+      const value = document.createElement('strong');
+      value.className = 'simulation-widget__metric-value';
+      value.textContent = metric.value;
+      card.appendChild(name);
+      card.appendChild(value);
+      table.appendChild(card);
+    });
+    metricsEl.appendChild(table);
+  };
+
+  const renderRisks = (risks) => {
+    if (!risksEl) return;
+    risksEl.innerHTML = '';
+    if (!risks || !risks.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className = 'simulation-widget__placeholder';
+      placeholder.textContent = 'No risks identified yet.';
+      risksEl.appendChild(placeholder);
+      return;
+    }
+    risks.forEach((risk) => {
+      const item = document.createElement('li');
+      item.textContent = risk;
+      risksEl.appendChild(item);
+    });
+  };
+
+  if (form) {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const scenario = form.querySelector('[name="scenario"]').value.trim();
-      const variables = form.querySelector('[name="variables"]').value
+      const formData = new FormData(form);
+      const scenario = String(formData.get('scenario') || '').trim();
+      const horizon = String(formData.get('horizon') || '').trim();
+      const metricsRaw = String(formData.get('metrics') || '');
+      if (!scenario) return;
+      const metrics = metricsRaw
         .split('\n')
         .map((value) => value.trim())
         .filter(Boolean);
-      if (!scenario || !variables.length) return;
-      output.innerHTML = `
-        <h3>${scenario}</h3>
-        <p>Variables in play:</p>
-        <ul>${variables.map((item) => `<li>${item}</li>`).join('')}</ul>
-      `;
-      if (statusEl) {
-        statusEl.textContent = 'Simulation queued';
+
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      setStatus('Running simulation…');
+
+      try {
+        const response = await fetchJSON('/api/simulation/run', {
+          method: 'POST',
+          body: JSON.stringify({
+            scenario,
+            horizon: horizon || '30 days',
+            metrics,
+          }),
+        });
+        if (summaryEl) {
+          summaryEl.innerHTML = `<h3>${response.scenario}</h3><p>${response.summary}</p>`;
+        }
+        renderTimeline(response.timeline);
+        renderMetrics(response.metrics);
+        renderRisks(response.risks);
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setStatus(`Simulation ready • ${response.model} @ ${timestamp}`);
+      } catch (error) {
+        console.error(error);
+        setStatus('Unable to run simulation');
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }
@@ -1506,121 +2416,357 @@ function createSimulationWidget(record) {
 function createWhiteboardWidget(record) {
   const widget = buildWidgetShell('whiteboard', record, {
     title: 'Collaboration whiteboard',
-    width: 540,
-    height: 500,
+    width: 640,
+    height: 520,
     offset: { left: 380, top: 360 },
     body: `
-      <div class="widget-app widget-app--split whiteboard-widget">
-        <section class="widget-app__panel whiteboard-widget__composer" aria-label="Add note">
+      <div class="whiteboard-widget whiteboard-widget--upgraded">
+        <section class="whiteboard-widget__inputs" aria-label="Add note">
           <div class="widget-app__panel-header">
-            <h3>New sticky</h3>
-            <span class="whiteboard-widget__badge">Local only</span>
+            <h3>New card</h3>
+            <span class="whiteboard-widget__badge" data-whiteboard-status>0 notes</span>
           </div>
-          <form class="widget-form" data-whiteboard-form>
-            <label class="widget-field">
-              <span>Add sticky note</span>
-              <input type="text" name="note" placeholder="Capture a decision or task" />
+          <form class="whiteboard-widget__form" data-whiteboard-form>
+            <label class="whiteboard-widget__field">
+              <span>Note</span>
+              <input type="text" name="note" placeholder="Capture a decision or task" required />
             </label>
-            <div class="widget-form__actions">
+            <label class="whiteboard-widget__field">
+              <span>Category</span>
+              <select name="category">
+                <option value="Idea">Idea</option>
+                <option value="Decision">Decision</option>
+                <option value="Risk">Risk</option>
+              </select>
+            </label>
+            <div class="whiteboard-widget__actions">
               <button type="submit" class="btn">Add note</button>
+              <button type="button" class="btn btn--ghost" data-whiteboard-ai>Summarize with AI</button>
             </div>
           </form>
         </section>
-        <section class="widget-app__panel whiteboard-widget__board" aria-live="polite">
-          <div class="widget-app__panel-header">
-            <h3>Ideas board</h3>
-            <span class="whiteboard-widget__status" data-whiteboard-count>0 notes</span>
+        <section class="whiteboard-widget__board" aria-live="polite">
+          <div class="whiteboard-widget__column" data-whiteboard-column="Idea">
+            <h4>Ideas</h4>
+            <ul class="whiteboard-widget__notes" data-whiteboard-list="Idea"></ul>
           </div>
-          <ul class="whiteboard-widget__notes" data-whiteboard-list></ul>
-          <p class="widget__hint">Shared cursors and live sync land here next.</p>
+          <div class="whiteboard-widget__column" data-whiteboard-column="Decision">
+            <h4>Decisions</h4>
+            <ul class="whiteboard-widget__notes" data-whiteboard-list="Decision"></ul>
+          </div>
+          <div class="whiteboard-widget__column" data-whiteboard-column="Risk">
+            <h4>Risks</h4>
+            <ul class="whiteboard-widget__notes" data-whiteboard-list="Risk"></ul>
+          </div>
         </section>
+        <aside class="whiteboard-widget__summary" aria-live="polite">
+          <h4>Highlights</h4>
+          <ul class="whiteboard-widget__list" data-whiteboard-highlights>
+            <li class="whiteboard-widget__placeholder">Ask AI to summarize your board.</li>
+          </ul>
+          <div class="whiteboard-widget__clusters" data-whiteboard-clusters></div>
+          <div class="whiteboard-widget__follow-ups">
+            <h4>Follow-ups</h4>
+            <ul class="whiteboard-widget__list" data-whiteboard-followups>
+              <li class="whiteboard-widget__placeholder">AI follow-ups will appear here.</li>
+            </ul>
+          </div>
+        </aside>
       </div>
     `,
   });
+
   const form = widget.querySelector('[data-whiteboard-form]');
-  const list = widget.querySelector('[data-whiteboard-list]');
-  const countEl = widget.querySelector('[data-whiteboard-count]');
-  if (form && list) {
+  const statusEl = widget.querySelector('[data-whiteboard-status]');
+  const summarizeBtn = widget.querySelector('[data-whiteboard-ai]');
+  const highlightsEl = widget.querySelector('[data-whiteboard-highlights]');
+  const clustersEl = widget.querySelector('[data-whiteboard-clusters]');
+  const followupsEl = widget.querySelector('[data-whiteboard-followups]');
+
+  const boardLists = {
+    Idea: widget.querySelector('[data-whiteboard-list="Idea"]'),
+    Decision: widget.querySelector('[data-whiteboard-list="Decision"]'),
+    Risk: widget.querySelector('[data-whiteboard-list="Risk"]'),
+  };
+
+  const notes = [];
+
+  const setStatus = () => {
+    if (statusEl) {
+      statusEl.textContent = `${notes.length} note${notes.length === 1 ? '' : 's'}`;
+    }
+  };
+
+  const renderBoard = () => {
+    Object.entries(boardLists).forEach(([category, list]) => {
+      if (!list) return;
+      list.innerHTML = '';
+      const categoryNotes = notes.filter((note) => note.category === category);
+      if (!categoryNotes.length) {
+        const placeholder = document.createElement('li');
+        placeholder.className = 'whiteboard-widget__placeholder';
+        placeholder.textContent = 'No notes yet.';
+        list.appendChild(placeholder);
+        return;
+      }
+      categoryNotes.forEach((note) => {
+        const item = document.createElement('li');
+        item.textContent = note.text;
+        list.appendChild(item);
+      });
+    });
+    setStatus();
+  };
+
+  const renderHighlights = (highlights) => {
+    if (!highlightsEl) return;
+    highlightsEl.innerHTML = '';
+    if (!highlights || !highlights.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className = 'whiteboard-widget__placeholder';
+      placeholder.textContent = 'Add notes and summarize to see highlights.';
+      highlightsEl.appendChild(placeholder);
+      return;
+    }
+    highlights.forEach((item) => {
+      const li = document.createElement('li');
+      li.textContent = item;
+      highlightsEl.appendChild(li);
+    });
+  };
+
+  const renderClusters = (clusters) => {
+    if (!clustersEl) return;
+    clustersEl.innerHTML = '';
+    if (!clusters || !clusters.length) {
+      const placeholder = document.createElement('p');
+      placeholder.className = 'whiteboard-widget__placeholder';
+      placeholder.textContent = 'AI clusters will show up after summarizing.';
+      clustersEl.appendChild(placeholder);
+      return;
+    }
+    clusters.forEach((cluster) => {
+      const section = document.createElement('section');
+      section.className = 'whiteboard-widget__cluster';
+      const title = document.createElement('h5');
+      title.textContent = cluster.label;
+      const list = document.createElement('ul');
+      list.className = 'whiteboard-widget__list';
+      (cluster.items || []).forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        list.appendChild(li);
+      });
+      section.appendChild(title);
+      section.appendChild(list);
+      clustersEl.appendChild(section);
+    });
+  };
+
+  const renderFollowUps = (items) => {
+    if (!followupsEl) return;
+    followupsEl.innerHTML = '';
+    if (!items || !items.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className = 'whiteboard-widget__placeholder';
+      placeholder.textContent = 'No follow-ups suggested yet.';
+      followupsEl.appendChild(placeholder);
+      return;
+    }
+    items.forEach((item) => {
+      const li = document.createElement('li');
+      li.textContent = item;
+      followupsEl.appendChild(li);
+    });
+  };
+
+  if (form) {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      const input = form.querySelector('[name="note"]');
-      const value = input.value.trim();
-      if (!value) return;
-      const item = document.createElement('li');
-      item.textContent = value;
-      list.appendChild(item);
-      input.value = '';
-      if (countEl) {
-        const total = list.querySelectorAll('li').length;
-        countEl.textContent = total === 1 ? '1 note' : `${total} notes`;
+      const formData = new FormData(form);
+      const text = String(formData.get('note') || '').trim();
+      const category = String(formData.get('category') || 'Idea');
+      if (!text) return;
+      notes.push({ text, category });
+      renderBoard();
+      form.reset();
+    });
+  }
+
+  if (summarizeBtn) {
+    summarizeBtn.addEventListener('click', async () => {
+      if (!notes.length) {
+        alert('Add a few notes before summarizing.');
+        return;
+      }
+      summarizeBtn.disabled = true;
+      setStatus('Summarizing…');
+      try {
+        const response = await fetchJSON('/api/whiteboard/summarize', {
+          method: 'POST',
+          body: JSON.stringify({ notes }),
+        });
+        renderHighlights(response.highlights);
+        renderClusters(response.clusters);
+        renderFollowUps(response.follow_ups);
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setStatus(`Summarized • ${response.model} @ ${timestamp}`);
+      } catch (error) {
+        console.error(error);
+        setStatus('Unable to summarize right now');
+      } finally {
+        summarizeBtn.disabled = false;
       }
     });
   }
+
+  renderBoard();
   return widget;
 }
 
 function createKnowledgeWidget(record) {
   const widget = buildWidgetShell('knowledge', record, {
     title: 'Knowledge board',
-    width: 500,
-    height: 500,
+    width: 640,
+    height: 520,
     offset: { left: 440, top: 380 },
     body: `
-      <div class="widget-app widget-app--split knowledge-widget">
-        <section class="widget-app__panel knowledge-widget__composer" aria-label="Add insight">
+      <div class="knowledge-widget knowledge-widget--upgraded">
+        <section class="knowledge-widget__inputs" aria-label="Curate board">
           <div class="widget-app__panel-header">
-            <h3>New insight</h3>
-            <span class="knowledge-widget__badge">Pinned locally</span>
+            <h3>Board brief</h3>
+            <span class="knowledge-widget__badge" data-knowledge-status>Awaiting theme</span>
           </div>
-          <form class="widget-form" data-knowledge-form>
-            <label class="widget-field">
-              <span>Title</span>
-              <input type="text" name="title" placeholder="Insight headline" required />
+          <form class="knowledge-widget__form" data-knowledge-form>
+            <label class="knowledge-widget__field">
+              <span>Theme</span>
+              <input type="text" name="theme" placeholder="AI adoption playbook" required />
             </label>
-            <label class="widget-field">
-              <span>Link or context</span>
-              <input type="url" name="url" placeholder="https://" />
+            <label class="knowledge-widget__field">
+              <span>Objective</span>
+              <input type="text" name="objective" placeholder="Enable field teams" />
             </label>
-            <div class="widget-form__actions">
-              <button type="submit" class="btn">Pin insight</button>
+            <label class="knowledge-widget__field">
+              <span>Audience</span>
+              <input type="text" name="audience" placeholder="Product and GTM leaders" />
+            </label>
+            <div class="knowledge-widget__actions">
+              <button type="submit" class="btn btn--primary">Curate board</button>
             </div>
           </form>
         </section>
-        <section class="widget-app__panel knowledge-widget__board" aria-live="polite">
-          <div class="widget-app__panel-header">
-            <h3>Knowledge feed</h3>
-            <span class="knowledge-widget__status" data-knowledge-count>No entries</span>
+        <section class="knowledge-widget__board" aria-live="polite">
+          <div class="knowledge-widget__columns" data-knowledge-columns>
+            <p class="knowledge-widget__placeholder">Generate a board to see curated columns.</p>
           </div>
-          <ol class="knowledge-widget__list" data-knowledge-list></ol>
+          <aside class="knowledge-widget__actions-list" aria-label="Recommended actions">
+            <h4>Recommended actions</h4>
+            <ul data-knowledge-actions>
+              <li class="knowledge-widget__placeholder">Actions appear after curation.</li>
+            </ul>
+          </aside>
         </section>
       </div>
     `,
   });
+
   const form = widget.querySelector('[data-knowledge-form]');
-  const list = widget.querySelector('[data-knowledge-list]');
-  const countEl = widget.querySelector('[data-knowledge-count]');
-  if (form && list) {
-    form.addEventListener('submit', (event) => {
+  const statusEl = widget.querySelector('[data-knowledge-status]');
+  const columnsEl = widget.querySelector('[data-knowledge-columns]');
+  const actionsEl = widget.querySelector('[data-knowledge-actions]');
+
+  const setStatus = (text) => {
+    if (statusEl) {
+      statusEl.textContent = text;
+    }
+  };
+
+  const renderColumns = (columns) => {
+    if (!columnsEl) return;
+    columnsEl.innerHTML = '';
+    if (!columns || !columns.length) {
+      const placeholder = document.createElement('p');
+      placeholder.className = 'knowledge-widget__placeholder';
+      placeholder.textContent = 'No curated insights yet.';
+      columnsEl.appendChild(placeholder);
+      return;
+    }
+    columns.forEach((column) => {
+      const section = document.createElement('section');
+      section.className = 'knowledge-widget__column';
+      const heading = document.createElement('h4');
+      heading.textContent = column.title;
+      const list = document.createElement('ul');
+      list.className = 'knowledge-widget__card-list';
+      (column.items || []).forEach((item) => {
+        const li = document.createElement('li');
+        li.className = 'knowledge-widget__card';
+        const title = document.createElement('h5');
+        title.textContent = item.title;
+        const summary = document.createElement('p');
+        summary.textContent = item.summary;
+        li.appendChild(title);
+        li.appendChild(summary);
+        if (item.link) {
+          const link = document.createElement('a');
+          link.href = item.link;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.textContent = 'Open source';
+          li.appendChild(link);
+        }
+        list.appendChild(li);
+      });
+      section.appendChild(heading);
+      section.appendChild(list);
+      columnsEl.appendChild(section);
+    });
+  };
+
+  const renderActions = (actions) => {
+    if (!actionsEl) return;
+    actionsEl.innerHTML = '';
+    if (!actions || !actions.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className = 'knowledge-widget__placeholder';
+      placeholder.textContent = 'No actions recommended yet.';
+      actionsEl.appendChild(placeholder);
+      return;
+    }
+    actions.forEach((action) => {
+      const li = document.createElement('li');
+      li.textContent = action;
+      actionsEl.appendChild(li);
+    });
+  };
+
+  if (form) {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const title = form.querySelector('[name="title"]').value.trim();
-      const url = form.querySelector('[name="url"]').value.trim();
-      if (!title) return;
-      const item = document.createElement('li');
-      if (url) {
-        const link = document.createElement('a');
-        link.href = url;
-        link.target = '_blank';
-        link.rel = 'noopener';
-        link.textContent = title;
-        item.appendChild(link);
-      } else {
-        item.textContent = title;
-      }
-      list.appendChild(item);
-      form.reset();
-      if (countEl) {
-        const total = list.querySelectorAll('li').length;
-        countEl.textContent = total === 0 ? 'No entries' : `${total} insight${total === 1 ? '' : 's'}`;
+      const formData = new FormData(form);
+      const theme = String(formData.get('theme') || '').trim();
+      const objective = String(formData.get('objective') || '').trim();
+      const audience = String(formData.get('audience') || '').trim();
+      if (!theme) return;
+
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      setStatus('Curating insights…');
+
+      try {
+        const response = await fetchJSON('/api/knowledge/curate', {
+          method: 'POST',
+          body: JSON.stringify({ theme, objective: objective || null, audience: audience || null }),
+        });
+        renderColumns(response.columns);
+        renderActions(response.actions);
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setStatus(`Curated • ${response.model} @ ${timestamp}`);
+      } catch (error) {
+        console.error(error);
+        setStatus('Unable to curate board');
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }

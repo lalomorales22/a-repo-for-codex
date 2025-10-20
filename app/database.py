@@ -207,6 +207,43 @@ class WorkspaceWidget(Base):
             self.config_json = None
 
 
+class CodeProject(Base):
+    """Container representing a logical code workspace."""
+
+    __tablename__ = "code_projects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    files: Mapped[list["CodeFile"]] = relationship(
+        "CodeFile",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="CodeFile.path",
+    )
+
+    @property
+    def file_count(self) -> int:
+        return len(self.files)
+
+
+class CodeFile(Base):
+    """Individual file tracked within a code project."""
+
+    __tablename__ = "code_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("code_projects.id", ondelete="CASCADE"))
+    path: Mapped[str] = mapped_column(String(512), nullable=False)
+    language: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    project: Mapped[CodeProject] = relationship("CodeProject", back_populates="files")
+
+    __table_args__ = (UniqueConstraint("project_id", "path", name="uq_code_file_path"),)
+
+
 class AudioTrack(Base):
     """Generated audio artifact."""
 

@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Generator
+from typing import Callable, Generator
 
 import json
+import textwrap
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -17,6 +18,8 @@ from .config import BASE_DIR, get_settings
 from .database import (
     Agent,
     AudioTrack,
+    CodeFile,
+    CodeProject,
     Conversation,
     Gallery,
     GalleryAsset,
@@ -38,12 +41,26 @@ from .schemas import (
     AudioGenerationRequest,
     AudioTrackRead,
     AudioTrackSummary,
+    AvatarDesignRequest,
+    AvatarDesignResponse,
+    CodeFileCreate,
+    CodeFileRead,
+    CodeFileUpdate,
+    CodeGenerationRequest,
+    CodeGenerationResponse,
+    CodeProjectRead,
     ConversationCreate,
     ConversationRead,
     ConversationSummary,
     ConversationUpdate,
     DataCatalogResponse,
     DataCatalogStats,
+    DataPoint,
+    DataVisualizationRequest,
+    DataVisualizationResponse,
+    DocumentDraftRequest,
+    DocumentDraftResponse,
+    DocumentSection,
     GalleryAssetAssignment,
     GalleryAssetCreate,
     GalleryAssetRead,
@@ -52,15 +69,28 @@ from .schemas import (
     GalleryRead,
     GallerySummary,
     GalleryUpdate,
+    GameConceptRequest,
+    GameConceptResponse,
     ImageRequest,
     ImageResponse,
+    KnowledgeBoardColumn,
+    KnowledgeBoardItem,
+    KnowledgeBoardRequest,
+    KnowledgeBoardResponse,
     MessageCreate,
     MessageRead,
     OpenAIResponse,
+    PresentationPlanRequest,
+    PresentationPlanResponse,
+    PresentationSlide,
+    SimulationRunRequest,
+    SimulationRunResponse,
     StudioRenderRequest,
     StudioRenderResponse,
     VideoRequest,
     VideoResponse,
+    WhiteboardSummaryRequest,
+    WhiteboardSummaryResponse,
     WorkspaceWidgetCreate,
     WorkspaceWidgetRead,
     WorkspaceWidgetSummary,
@@ -76,6 +106,128 @@ app = FastAPI(title="OpenAI Mega App", version="1.0.0")
 def get_db() -> Generator:
     with session_scope() as session:
         yield session
+
+
+def ensure_default_code_project(db) -> CodeProject:
+    """Guarantee that at least one code project exists for the sandbox."""
+
+    project = db.query(CodeProject).order_by(CodeProject.created_at.asc()).first()
+    if project is not None:
+        return project
+
+    project = CodeProject(
+        name="Launch Control API",
+        description="Demo workspace showcasing how the sandbox persists code.",
+    )
+    db.add(project)
+    db.flush()
+    sample_files = [
+        (
+            "README.md",
+            "markdown",
+            textwrap.dedent(
+                """
+                # Launch Control API
+
+                This demo project powers the Mega App's sandbox. It includes:
+
+                - A FastAPI service with observability hooks
+                - A lightweight tasks module for async job orchestration
+                - Example tests illustrating data access patterns
+                """
+            ).strip(),
+        ),
+        (
+            "src/api.py",
+            "python",
+            textwrap.dedent(
+                """
+                from fastapi import APIRouter, HTTPException
+
+
+                router = APIRouter()
+
+
+                @router.get("/health")
+                async def health_check() -> dict[str, str]:
+                    return {"status": "ok"}
+
+
+                @router.post("/deploy")
+                async def trigger_deploy(payload: dict) -> dict[str, str]:
+                    if not payload.get("environment"):
+                        raise HTTPException(status_code=422, detail="Missing environment")
+                    return {"status": "scheduled", "environment": payload["environment"]}
+                """
+            ).strip(),
+        ),
+        (
+            "src/tasks.py",
+            "python",
+            textwrap.dedent(
+                """
+                import asyncio
+                from collections.abc import Callable
+
+
+                async def run_job(name: str, step: Callable[[], None]) -> str:
+                    await asyncio.sleep(0.1)
+                    step()
+                    return f"job:{name}:completed"
+                """
+            ).strip(),
+        ),
+        (
+            "tests/test_api.py",
+            "python",
+            textwrap.dedent(
+                """
+                from httpx import AsyncClient
+
+
+                async def test_health(app_client: AsyncClient) -> None:
+                    response = await app_client.get("/health")
+                    assert response.status_code == 200
+                    assert response.json()["status"] == "ok"
+                """
+            ).strip(),
+        ),
+    ]
+    for path, language, content in sample_files:
+        db.add(
+            CodeFile(
+                project_id=project.id,
+                path=path,
+                language=language,
+                content=f"{content}\n",
+            )
+        )
+    db.flush()
+    db.refresh(project)
+    return project
+
+
+def ai_structured_response(
+    system_prompt: str,
+    user_prompt: str,
+    fallback: Callable[[], dict],
+    *,
+    model: str = "gpt-4.1-mini",
+) -> tuple[dict, str]:
+    """Call OpenAI for structured JSON responses, falling back to local data."""
+
+    if not openai_client.is_live:
+        data = fallback()
+        return data, "offline-simulated"
+
+    response = openai_client.structured_chat(system_prompt, user_prompt, model=model)
+    content = response.get("content", "")
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        data = fallback()
+    model_used = response.get("model", model)
+    return data, model_used
 
 
 @app.on_event("startup")
@@ -400,6 +552,566 @@ def delete_widget(widget_id: int, db=Depends(get_db)):
     return None
 
 
+@app.get("/api/code/projects", response_model=list[CodeProjectRead])
+def list_code_projects(db=Depends(get_db)):
+    ensure_default_code_project(db)
+    projects = db.query(CodeProject).order_by(CodeProject.created_at.asc()).all()
+    return [CodeProjectRead.model_validate(project) for project in projects]
+
+
+@app.get("/api/code/projects/{project_id}/files", response_model=list[CodeFileRead])
+def list_code_files(project_id: int, db=Depends(get_db)):
+    project = db.get(CodeProject, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return [CodeFileRead.model_validate(file) for file in project.files]
+
+
+@app.post(
+    "/api/code/projects/{project_id}/files",
+    response_model=CodeFileRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_code_file(project_id: int, payload: CodeFileCreate, db=Depends(get_db)):
+    project = db.get(CodeProject, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    existing = (
+        db.query(CodeFile)
+        .filter(CodeFile.project_id == project_id, CodeFile.path == payload.path.strip())
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="File already exists")
+    code_file = CodeFile(
+        project_id=project_id,
+        path=payload.path.strip(),
+        language=payload.language,
+        content=payload.content or "",
+    )
+    db.add(code_file)
+    db.flush()
+    db.refresh(code_file)
+    return CodeFileRead.model_validate(code_file)
+
+
+@app.patch(
+    "/api/code/projects/{project_id}/files/{file_id}",
+    response_model=CodeFileRead,
+)
+def update_code_file(project_id: int, file_id: int, payload: CodeFileUpdate, db=Depends(get_db)):
+    code_file = db.get(CodeFile, file_id)
+    if code_file is None or code_file.project_id != project_id:
+        raise HTTPException(status_code=404, detail="File not found")
+    data = payload.model_dump(exclude_unset=True)
+    new_path = data.get("path")
+    if new_path and new_path != code_file.path:
+        duplicate = (
+            db.query(CodeFile)
+            .filter(CodeFile.project_id == project_id, CodeFile.path == new_path)
+            .first()
+        )
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Another file already uses this path")
+        code_file.path = new_path
+    if "language" in data:
+        code_file.language = data["language"]
+    if "content" in data and data["content"] is not None:
+        code_file.content = data["content"]
+    code_file.updated_at = datetime.utcnow()
+    db.flush()
+    db.refresh(code_file)
+    return CodeFileRead.model_validate(code_file)
+
+
+@app.post("/api/code/projects/{project_id}/generate", response_model=CodeGenerationResponse)
+def generate_code_suggestion(project_id: int, payload: CodeGenerationRequest, db=Depends(get_db)):
+    project = db.get(CodeProject, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    def fallback() -> dict:
+        language = payload.language or "Python"
+        context_line = f"# Context: {payload.context.strip()}\n" if payload.context else ""
+        snippet = textwrap.dedent(
+            f"""
+            {context_line}# Generated {language} snippet responding to: {payload.prompt}
+            def main():
+                """Auto-generated placeholder function."""
+                return "Replace with live generation once the AI client is configured."
+
+            if __name__ == "__main__":
+                print(main())
+            """
+        ).strip()
+        explanation = (
+            "Simulated response summarising how the snippet could address the request. "
+            "Connect your OpenAI API key to stream real code completions."
+        )
+        return {"code": snippet, "explanation": explanation}
+
+    system_prompt = textwrap.dedent(
+        """
+        You are an expert pair-programming assistant. Respond with JSON containing two keys:
+        - "code": the generated code snippet (string)
+        - "explanation": a concise explanation of what the code does (string)
+        Avoid markdown code fences. Tailor the snippet to the provided language and context.
+        """
+    ).strip()
+    context_parts = [f"Project: {project.name}", f"Prompt: {payload.prompt}"]
+    if payload.language:
+        context_parts.append(f"Language: {payload.language}")
+    if payload.file_path:
+        context_parts.append(f"File: {payload.file_path}")
+    if payload.context:
+        context_parts.append(f"Context:\n{payload.context}")
+    user_prompt = "\n\n".join(context_parts)
+    data, model_used = ai_structured_response(system_prompt, user_prompt, fallback)
+    return CodeGenerationResponse(
+        code=data.get("code", ""),
+        explanation=data.get("explanation", ""),
+        model=model_used,
+    )
+
+
+@app.post("/api/document/draft", response_model=DocumentDraftResponse)
+def draft_document(payload: DocumentDraftRequest):
+    def fallback() -> dict:
+        outline = payload.key_points or [
+            f"Why {payload.topic} matters for {payload.audience}",
+            "Key opportunities",
+            "Risks and mitigations",
+        ]
+        sections = [
+            {
+                "heading": heading,
+                "content": (
+                    f"{heading} for {payload.audience} framed in a {payload.tone} tone. "
+                    "Connects decisions to measurable outcomes."
+                ),
+            }
+            for heading in outline
+        ]
+        return {
+            "title": f"{payload.topic} brief",
+            "summary": (
+                f"{payload.topic} overview for {payload.audience}. "
+                "Highlights opportunities, mitigations, and next actions."
+            ),
+            "outline": outline,
+            "sections": sections,
+            "call_to_actions": [
+                "Circulate with stakeholders",
+                "Gather feedback on priorities",
+                "Translate into delivery roadmap",
+            ],
+        }
+
+    baseline = fallback()
+    system_prompt = textwrap.dedent(
+        """
+        You are a staff-level product writer. Return JSON with keys title, summary, outline (list of strings),
+        sections (list of {"heading": str, "content": str}), and call_to_actions (list of strings).
+        Respond in the requested tone.
+        """
+    ).strip()
+    key_points = "\n".join(f"- {point}" for point in payload.key_points) if payload.key_points else ""
+    user_prompt = textwrap.dedent(
+        f"""
+        Topic: {payload.topic}
+        Audience: {payload.audience}
+        Tone: {payload.tone}
+        Key points:
+        {key_points or '- Emphasise practical outcomes'}
+        """
+    ).strip()
+    data, model_used = ai_structured_response(system_prompt, user_prompt, fallback)
+    document_data = {
+        "title": data.get("title") or baseline["title"],
+        "summary": data.get("summary") or baseline["summary"],
+        "outline": data.get("outline") or baseline["outline"],
+        "sections": data.get("sections") or baseline["sections"],
+        "call_to_actions": data.get("call_to_actions") or baseline["call_to_actions"],
+    }
+    return DocumentDraftResponse(model=model_used, **document_data)
+
+
+@app.post("/api/presentation/plan", response_model=PresentationPlanResponse)
+def plan_presentation(payload: PresentationPlanRequest):
+    def fallback() -> dict:
+        slides = [
+            {
+                "title": "Opening story",
+                "bullets": [
+                    f"Context for {payload.audience}",
+                    "Define the customer tension",
+                    "Preview the solution",
+                ],
+                "visual": "Hero metric or customer quote",
+            },
+            {
+                "title": "Solution architecture",
+                "bullets": [
+                    "How the system works",
+                    "Integration touchpoints",
+                    "Operational ownership",
+                ],
+                "visual": "Layered diagram",
+            },
+            {
+                "title": "Roadmap",
+                "bullets": [
+                    "Milestones by quarter",
+                    "Dependencies",
+                    "Risks and asks",
+                ],
+                "visual": "Timeline",
+            },
+        ]
+        return {
+            "headline": f"{payload.theme} narrative",
+            "slides": slides,
+            "next_steps": [
+                "Confirm owners for follow-up questions",
+                "Share recording and key artifacts",
+                "Book working session to refine details",
+            ],
+        }
+
+    baseline = fallback()
+    system_prompt = textwrap.dedent(
+        """
+        You help product teams craft executive-ready presentations. Reply with JSON containing headline,
+        slides (array of {"title": str, "bullets": [str], "visual": str}), and next_steps (array of str).
+        Match the requested tone and duration.
+        """
+    ).strip()
+    goals = "\n".join(f"- {goal}" for goal in payload.goals) if payload.goals else "- Align stakeholders"
+    user_prompt = textwrap.dedent(
+        f"""
+        Theme: {payload.theme}
+        Audience: {payload.audience}
+        Duration: {payload.duration_minutes} minutes
+        Goals:\n{goals}
+        """
+    ).strip()
+    data, model_used = ai_structured_response(system_prompt, user_prompt, fallback)
+    plan_data = {
+        "headline": data.get("headline") or baseline["headline"],
+        "slides": data.get("slides") or baseline["slides"],
+        "next_steps": data.get("next_steps") or baseline["next_steps"],
+    }
+    return PresentationPlanResponse(model=model_used, **plan_data)
+
+
+@app.post("/api/data/visualize", response_model=DataVisualizationResponse)
+def visualize_data(payload: DataVisualizationRequest):
+    def fallback() -> dict:
+        dataset = [
+            {"label": "North America", "value": 42.5},
+            {"label": "EMEA", "value": 35.0},
+            {"label": "APAC", "value": 27.4},
+        ]
+        return {
+            "chart_type": payload.chart_preference or "bar",
+            "dataset": dataset,
+            "summary": f"Primary insight: {payload.dataset_description} shows strongest momentum in North America.",
+            "insights": [
+                "North America leads growth with clear margin",
+                "EMEA stabilises after previous quarter's dip",
+                "APAC acceleration suggests investment opportunity",
+            ],
+        }
+
+    baseline = fallback()
+    system_prompt = textwrap.dedent(
+        """
+        You are a data storyteller. Return JSON with chart_type, dataset (array of {"label": str, "value": number}),
+        summary (string), and insights (array of strings). Keep values numeric.
+        """
+    ).strip()
+    user_prompt = textwrap.dedent(
+        f"""
+        Dataset description: {payload.dataset_description}
+        Desired chart: {payload.chart_preference}
+        Goal: {payload.goal or 'Highlight actionable trends'}
+        """
+    ).strip()
+    data, model_used = ai_structured_response(system_prompt, user_prompt, fallback)
+    viz_data = {
+        "chart_type": data.get("chart_type") or baseline["chart_type"],
+        "dataset": data.get("dataset") or baseline["dataset"],
+        "summary": data.get("summary") or baseline["summary"],
+        "insights": data.get("insights") or baseline["insights"],
+    }
+    return DataVisualizationResponse(model=model_used, **viz_data)
+
+
+@app.post("/api/game/concept", response_model=GameConceptResponse)
+def build_game_concept(payload: GameConceptRequest):
+    def fallback() -> dict:
+        return {
+            "elevator_pitch": f"{payload.genre.title()} game where players {payload.fantasy.lower()}.",
+            "core_loop": [
+                "Collect signals from the simulation",
+                "Synthesize strategies with AI advisor",
+                "Deploy actions and review outcomes",
+            ],
+            "mechanics": payload.pillars
+            or [
+                "Dynamic market events",
+                "Co-op planning board",
+                "Skill tree that unlocks automation",
+            ],
+            "progression": [
+                "Tutorial: establish baseline",
+                "Season: compete asynchronously",
+                "Endgame: unlock persistent world modifiers",
+            ],
+            "monetization": ["Season pass", "Cosmetic bundles", "Collaborative events"],
+        }
+
+    baseline = fallback()
+    system_prompt = textwrap.dedent(
+        """
+        You are a senior game designer. Return JSON with elevator_pitch, core_loop (array of str), mechanics (array of str),
+        progression (array of str), and monetization (array of str). Tie ideas back to the fantasy.
+        """
+    ).strip()
+    pillars = "\n".join(f"- {pillar}" for pillar in payload.pillars) if payload.pillars else "- Player agency"
+    user_prompt = textwrap.dedent(
+        f"""
+        Fantasy: {payload.fantasy}
+        Genre: {payload.genre}
+        Platform: {payload.platform or 'Cross-platform'}
+        Pillars:\n{pillars}
+        """
+    ).strip()
+    data, model_used = ai_structured_response(system_prompt, user_prompt, fallback)
+    concept_data = {
+        "elevator_pitch": data.get("elevator_pitch") or baseline["elevator_pitch"],
+        "core_loop": data.get("core_loop") or baseline["core_loop"],
+        "mechanics": data.get("mechanics") or baseline["mechanics"],
+        "progression": data.get("progression") or baseline["progression"],
+        "monetization": data.get("monetization") or baseline["monetization"],
+    }
+    return GameConceptResponse(model=model_used, **concept_data)
+
+
+@app.post("/api/avatar/design", response_model=AvatarDesignResponse)
+def design_avatar(payload: AvatarDesignRequest):
+    def fallback() -> dict:
+        palette = ["#0ea5e9", "#38bdf8", "#e0f2fe"] if payload.palette_hint is None else [
+            payload.palette_hint,
+            "#f97316",
+            "#fef3c7",
+        ]
+        return {
+            "concept_name": payload.name,
+            "description": (
+                f"{payload.name} rendered in a {payload.style} style with {payload.vibe or 'confident'} energy."
+            ),
+            "palette": palette,
+            "accessories": ["Neural interface", "Motion scarf", "Soft glow"],
+            "prompt": (
+                f"Portrait of {payload.name}, {payload.vibe or 'optimistic'} vibe, {payload.style} aesthetic, "
+                f"studio lighting, detailed textures"
+            ),
+        }
+
+    baseline = fallback()
+    system_prompt = textwrap.dedent(
+        """
+        You are an art director crafting character sheets. Reply with JSON containing concept_name, description, palette
+        (array of hex strings), accessories (array of str), and prompt (string for an image model).
+        """
+    ).strip()
+    user_prompt = textwrap.dedent(
+        f"""
+        Name: {payload.name}
+        Style: {payload.style}
+        Vibe: {payload.vibe or 'uplifting'}
+        Palette hint: {payload.palette_hint or 'cool neutrals'}
+        """
+    ).strip()
+    data, model_used = ai_structured_response(system_prompt, user_prompt, fallback)
+    avatar_data = {
+        "concept_name": data.get("concept_name") or baseline["concept_name"],
+        "description": data.get("description") or baseline["description"],
+        "palette": data.get("palette") or baseline["palette"],
+        "accessories": data.get("accessories") or baseline["accessories"],
+        "prompt": data.get("prompt") or baseline["prompt"],
+    }
+    return AvatarDesignResponse(model=model_used, **avatar_data)
+
+
+@app.post("/api/simulation/run", response_model=SimulationRunResponse)
+def run_simulation(payload: SimulationRunRequest):
+    def fallback() -> dict:
+        return {
+            "scenario": payload.scenario,
+            "timeline": [
+                {"phase": "T0", "details": "Baseline state captured and telemetry streaming"},
+                {"phase": "T+1", "details": "Scenario injected, AI agent tuning parameters"},
+                {"phase": "T+2", "details": "Stabilisation reached, exporting playbook"},
+            ],
+            "metrics": [
+                {"name": metric, "value": "Trending"} for metric in (payload.metrics or ["Throughput", "Latency"])
+            ],
+            "risks": ["Data freshness", "Operator adoption"],
+            "summary": (
+                f"Simulation for {payload.scenario} completes within {payload.horizon}, "
+                "highlighting mitigation strategies and follow-up analyses."
+            ),
+        }
+
+    baseline = fallback()
+    system_prompt = textwrap.dedent(
+        """
+        You model operational simulations. Return JSON with scenario, timeline (array of {"phase": str, "details": str}),
+        metrics (array of {"name": str, "value": str}), risks (array of str), and summary (string).
+        """
+    ).strip()
+    metrics = "\n".join(f"- {metric}" for metric in payload.metrics) if payload.metrics else "- Throughput"
+    user_prompt = textwrap.dedent(
+        f"""
+        Scenario: {payload.scenario}
+        Horizon: {payload.horizon}
+        Metrics:\n{metrics}
+        """
+    ).strip()
+    data, model_used = ai_structured_response(system_prompt, user_prompt, fallback)
+    simulation_data = {
+        "scenario": data.get("scenario") or baseline["scenario"],
+        "timeline": data.get("timeline") or baseline["timeline"],
+        "metrics": data.get("metrics") or baseline["metrics"],
+        "risks": data.get("risks") or baseline["risks"],
+        "summary": data.get("summary") or baseline["summary"],
+    }
+    return SimulationRunResponse(model=model_used, **simulation_data)
+
+
+@app.post("/api/whiteboard/summarize", response_model=WhiteboardSummaryResponse)
+def summarize_whiteboard(payload: WhiteboardSummaryRequest):
+    def fallback() -> dict:
+        notes = payload.notes or []
+        highlights = [note.get("text", "") for note in notes][:3]
+        clusters: list[dict[str, list[str]]] = []
+        by_category: dict[str, list[str]] = {}
+        for note in notes:
+            category = note.get("category", "Ideas")
+            by_category.setdefault(category, []).append(note.get("text", ""))
+        for category, items in by_category.items():
+            clusters.append({"label": category, "items": [item for item in items if item]})
+        follow_ups = ["Confirm owners", "Document decisions", "Sync with stakeholders"]
+        return {
+            "highlights": highlights or ["Board is ready for more detail"],
+            "clusters": clusters,
+            "follow_ups": follow_ups,
+        }
+
+    baseline = fallback()
+    system_prompt = textwrap.dedent(
+        """
+        You are an AI collaborator reviewing a whiteboard. Return JSON with highlights (array of str),
+        clusters (array of {"label": str, "items": [str]}), and follow_ups (array of str).
+        """
+    ).strip()
+    formatted_notes = "\n".join(
+        f"- [{note.get('category', 'Idea')}] {note.get('text', '')}" for note in payload.notes
+    )
+    user_prompt = textwrap.dedent(
+        f"""
+        Notes collected:\n{formatted_notes or '- No notes captured yet'}
+        """
+    ).strip()
+    data, model_used = ai_structured_response(system_prompt, user_prompt, fallback)
+    summary_data = {
+        "highlights": data.get("highlights") or baseline["highlights"],
+        "clusters": data.get("clusters") or baseline["clusters"],
+        "follow_ups": data.get("follow_ups") or baseline["follow_ups"],
+    }
+    return WhiteboardSummaryResponse(model=model_used, **summary_data)
+
+
+@app.post("/api/knowledge/curate", response_model=KnowledgeBoardResponse)
+def curate_knowledge(payload: KnowledgeBoardRequest):
+    def fallback() -> dict:
+        columns = [
+            {
+                "title": "Signals",
+                "items": [
+                    {
+                        "title": "Industry benchmark",
+                        "summary": "Latest report summarising adoption curves",
+                        "link": "https://example.com/benchmark",
+                    },
+                    {
+                        "title": "Customer interview",
+                        "summary": "Head of Ops outlines pain in daily workflow",
+                        "link": None,
+                    },
+                ],
+            },
+            {
+                "title": "Insights",
+                "items": [
+                    {
+                        "title": "Automation reduces toil",
+                        "summary": "Teams adopting copilots cut manual effort by 32%",
+                        "link": None,
+                    },
+                    {
+                        "title": "Change management",
+                        "summary": "Upskilling plan accelerates adoption",
+                        "link": "https://example.com/change",
+                    },
+                ],
+            },
+            {
+                "title": "Actions",
+                "items": [
+                    {
+                        "title": "Pilot program",
+                        "summary": "Launch with operations pod to validate impact",
+                        "link": None,
+                    },
+                ],
+            },
+        ]
+        return {
+            "theme": payload.theme,
+            "columns": columns,
+            "actions": [
+                "Share with leadership circle",
+                "Schedule enablement workshop",
+                "Track insight freshness monthly",
+            ],
+        }
+
+    baseline = fallback()
+    system_prompt = textwrap.dedent(
+        """
+        You compile knowledge boards. Respond with JSON containing theme, columns (array of {"title": str, "items":
+        [{"title": str, "summary": str, "link": str|null}]}), and actions (array of str). Highlight diversity of sources.
+        """
+    ).strip()
+    user_prompt = textwrap.dedent(
+        f"""
+        Theme: {payload.theme}
+        Objective: {payload.objective or 'Enable fast onboarding'}
+        Audience: {payload.audience or 'Product and GTM teams'}
+        """
+    ).strip()
+    data, model_used = ai_structured_response(system_prompt, user_prompt, fallback)
+    board_data = {
+        "theme": data.get("theme") or baseline["theme"],
+        "columns": data.get("columns") or baseline["columns"],
+        "actions": data.get("actions") or baseline["actions"],
+    }
+    return KnowledgeBoardResponse(model=model_used, **board_data)
+
+
 @app.get("/api/galleries", response_model=list[GalleryRead])
 def list_galleries(db=Depends(get_db)):
     galleries = db.query(Gallery).order_by(Gallery.updated_at.desc()).all()
@@ -620,6 +1332,8 @@ def get_data_catalog(db=Depends(get_db)):
         agents=db.query(func.count(Agent.id)).scalar() or 0,
         audio_tracks=db.query(func.count(AudioTrack.id)).scalar() or 0,
         widgets=db.query(func.count(WorkspaceWidget.id)).scalar() or 0,
+        code_projects=db.query(func.count(CodeProject.id)).scalar() or 0,
+        code_files=db.query(func.count(CodeFile.id)).scalar() or 0,
     )
 
     limit = 6

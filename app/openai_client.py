@@ -46,6 +46,12 @@ class OpenAIMegaClient:
         else:
             self._client = None
 
+    @property
+    def is_live(self) -> bool:
+        """Return True when the OpenAI client is configured with a real API key."""
+
+        return self._client is not None
+
     def chat(self, history: Iterable[dict[str, str]], *, model: str) -> dict[str, Any]:
         """Call the Responses API to generate chat completions."""
 
@@ -85,6 +91,21 @@ class OpenAIMegaClient:
             "model": response.model,
             "usage": usage,
         }
+
+    def structured_chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        model: str = "gpt-4.1-mini",
+    ) -> dict[str, Any]:
+        """Small helper to request JSON-style outputs using the chat interface."""
+
+        history = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        return self.chat(history, model=model)
 
     def create_image(self, prompt: str, *, size: str, quality: str) -> dict[str, Any]:
         """Generate an image using the Images API with gpt-image-1."""
